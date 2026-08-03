@@ -7,6 +7,7 @@ from chat.api.schemas.session import (
 )
 from chat.api.converters import convert_to_ui_messages
 from chat.application.agents import AgentResolver
+from chat.application.suspended_chat_service import SuspendedChatService
 from chat.domain.entities import ChatSession
 from chat.domain.error_codes import ChatErrorCode
 from chat.domain.repositories import SessionRepository, MessageRepository
@@ -146,11 +147,21 @@ async def get_session_messages(
         user_id: str = Depends(require_login),
         session_repo: SessionRepository = Depends(Provide[Container.session_repo]),
         message_repo: MessageRepository = Depends(Provide[Container.message_repo]),
+        suspended_chat_service: SuspendedChatService = Depends(Provide[Container.suspended_chat_service]),
 ):
     await session_repo.get_session_for_user(session_id, user_id)
 
     page_messages, total_turns = await message_repo.list_session_message_turns_page(session_id, page=page, size=size)
-    ui_messages = convert_to_ui_messages(page_messages)
+    messages_for_ui = list(page_messages)
+    pending_tool_states = None
+    
+    # 仅在最新回合展示待处理SuspendedChat内容
+    if page == 1:
+        pending_display = await suspended_chat_service.get_pending_turn_for_display(user_id, session_id)
+        if pending_display is not None:
+            pending_messages, pending_tool_states = pending_display
+            messages_for_ui.extend(pending_messages)
+    ui_messages = convert_to_ui_messages(messages_for_ui, pending_tool_states=pending_tool_states)
 
     return R.success(data=PageResult.of(
         items=ui_messages,

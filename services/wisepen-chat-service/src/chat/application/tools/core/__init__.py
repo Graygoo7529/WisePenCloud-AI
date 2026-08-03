@@ -6,6 +6,7 @@ from chat.application.tools.core.definition import (
     ToolParametersSchema,
     ToolPolicy,
     ToolRiskLevel,
+    ToolExecutionTarget,
     ToolTimeoutStrategy,
 )
 
@@ -17,6 +18,8 @@ from chat.application.tools.core.registry import (
 from chat.application.tools.core.llm.invocation import (
     ToolCallMessageAccumulator,
     ToolInvocation,
+    ToolInvocationGroups,
+    group_tool_invocations,
     tool_call_parse,
 )
 
@@ -60,6 +63,7 @@ __all__ = [
     "ToolParametersSchema",
     "ToolPolicy",
     "ToolRiskLevel",
+    "ToolExecutionTarget",
     "ToolTimeoutStrategy",
 
     # registry / scope
@@ -69,6 +73,8 @@ __all__ = [
     # invocation
     "ToolCallMessageAccumulator",
     "ToolInvocation",
+    "ToolInvocationGroups",
+    "group_tool_invocations",
     "tool_call_parse",
 
     # renderer

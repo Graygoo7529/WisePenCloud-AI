@@ -76,6 +76,24 @@ def tool_output_available(tool_call_id: str, output: Union[Dict, str]) -> str:
     return _sse({"type": "tool-output-available", "toolCallId": tool_call_id, "output": output})
 
 
+def tool_output_error(tool_call_id: str, error_text: str) -> str:
+    return _sse({"type": "tool-output-error", "toolCallId": tool_call_id, "errorText": error_text})
+
+
+def tool_output_denied(tool_call_id: str) -> str:
+    return _sse({"type": "tool-output-denied", "toolCallId": tool_call_id})
+
+
+def tool_approval_request(approval_id: str, tool_call_id: str, tool_name: str, input: Dict) -> str:
+    return _sse({
+        "type": "tool-approval-request",
+        "approvalId": approval_id,
+        "toolCallId": tool_call_id,
+        "toolName": tool_name,
+        "input": input,
+    })
+
+
 # =============================================================================
 # 步骤
 # =============================================================================

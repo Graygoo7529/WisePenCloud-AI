@@ -7,6 +7,7 @@ from chat.application.tools.core.execution.result import ToolExecutionError, Too
 
 from chat.application.tools.core.llm.invocation import ToolInvocation
 from chat.application.tools.core.registry import ToolScope
+from chat.application.tools.core.definition import ToolExecutionTarget
 
 
 class ToolExecutor:
@@ -22,6 +23,13 @@ class ToolExecutor:
                 raise ToolExecutionError(
                     reason="Tool Unavailable",
                     detail_reason=f"Tool '{invocation.tool_name}' is not available in this scope.",
+                    retryable=False,
+                )
+
+            if tool.definition.policy.execution_target == ToolExecutionTarget.CLIENT:
+                raise ToolExecutionError(
+                    reason="Client Tool Cannot Execute On Server",
+                    detail_reason=f"Tool '{invocation.tool_name}' must be executed by the client.",
                     retryable=False,
                 )
 

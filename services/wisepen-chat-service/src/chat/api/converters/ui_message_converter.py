@@ -8,7 +8,10 @@ from typing import Any, Dict, List, Optional
 from chat.domain.entities import ChatMessage, Role
 
 
-def convert_to_ui_messages(messages: List[ChatMessage]) -> List[Dict[str, Any]]:
+def convert_to_ui_messages(
+    messages: List[ChatMessage],
+    pending_tool_states: dict[str, str] | None = None,
+) -> List[Dict[str, Any]]:
     """
     将按 created_at 排序的 ChatMessage[] 分组并转换为 UIMessage[]。
 
@@ -16,10 +19,13 @@ def convert_to_ui_messages(messages: List[ChatMessage]) -> List[Dict[str, Any]]:
     - 每条 user 消息独立成一个 UIMessage
     - user 消息之后、下一条 user 消息之前的所有 assistant + tool 消息
       合并为一个 assistant UIMessage，其 parts 按原始顺序构建
+
+    新增参数pending_tool_states，以便前端可按状态渲染“待处理工具”
     """
     if not messages:
         return []
-
+    
+    pending_tool_states = pending_tool_states or {}
     groups: List[List[ChatMessage]] = []
     current_group: List[ChatMessage] = []
 
@@ -41,7 +47,7 @@ def convert_to_ui_messages(messages: List[ChatMessage]) -> List[Dict[str, Any]]:
         if first.role == Role.USER:
             result.append(_build_user_ui_message(first))
         else:
-            ui_msg = _build_assistant_ui_message(group)
+            ui_msg = _build_assistant_ui_message(group, pending_tool_states)
             if ui_msg:
                 result.append(ui_msg)
 
@@ -60,7 +66,10 @@ def _build_user_ui_message(msg: ChatMessage) -> Dict[str, Any]:
     }
 
 
-def _build_assistant_ui_message(group: List[ChatMessage]) -> Optional[Dict[str, Any]]:
+def _build_assistant_ui_message(
+    group: List[ChatMessage],
+    pending_tool_states: dict[str, str],
+) -> Optional[Dict[str, Any]]:
     """
     将一组连续的 assistant + tool 消息合并为单个 assistant UIMessage。
 
@@ -100,15 +109,16 @@ def _build_assistant_ui_message(group: List[ChatMessage]) -> Optional[Dict[str, 
                     except (json.JSONDecodeError, TypeError):
                         parsed_input = {}
 
-                    tool_output = tool_results.get(tc.call_id, "")
-
-                    parts.append({
+                    pending_state = pending_tool_states.get(tc.call_id)
+                    part = {
                         "type": f"tool-{tc.name}",
                         "toolCallId": tc.call_id,
-                        "state": "output-available",
                         "input": parsed_input,
-                        "output": tool_output,
-                    })
+                        "state": pending_state or "output-available",
+                    }
+                    if pending_state is None:
+                        part["output"] = tool_results.get(tc.call_id, "")
+                    parts.append(part)
 
             if msg.content:
                 parts.append({

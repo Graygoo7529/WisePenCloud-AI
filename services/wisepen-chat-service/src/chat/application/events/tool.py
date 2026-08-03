@@ -27,3 +27,29 @@ class ToolOutputAvailableEvent(StreamEvent):
 
     call_id: str
     output: Any
+
+
+@dataclass(frozen=True)
+class ToolOutputErrorEvent(StreamEvent):
+    """工具输出失败。"""
+
+    call_id: str
+    error_text: str
+
+
+@dataclass(frozen=True)
+class ToolOutputDeniedEvent(StreamEvent):
+    """工具调用被用户拒绝。"""
+
+    call_id: str
+
+
+@dataclass(frozen=True)
+class ToolApprovalRequiredEvent(StreamEvent):
+    """高危工具需要用户审批。"""
+
+    call_id: str
+    tool_name: str
+    risk_level: str
+    input: dict[str, Any]
+    description: str

@@ -17,16 +17,20 @@ from chat.application.events import (
     ToolInputAvailableEvent,
     ToolInputStartEvent,
     ToolOutputAvailableEvent,
+    ToolOutputErrorEvent,
+    ToolApprovalRequiredEvent,
+    StepResumeRequirement,
 )
 from chat.application.llm_provider_resolver import LLMProviderResolver
 from chat.application.token_counter import TokenCounter
 from chat.application.tools import ToolScope
 from chat.application.tools.core.execution.dispatcher import ToolDispatcher
-from chat.application.tools.core.llm.invocation import ToolInvocation
+from chat.application.tools.core.llm.invocation import ToolInvocation, group_tool_invocations
 from chat.application.tools.core.llm.renderer import tool_result_renderer
 from chat.core.config.app_settings import settings
 from chat.domain.entities import ChatMessage, Role
 from chat.domain.entities.message import MessageModelInfo, ToolCallMessage
+from chat.domain.entities.suspended_chat import SuspendedChatReason
 from chat.domain.error_codes import ChatErrorCode
 from chat.domain.interfaces import LLMProvider
 from chat.domain.interfaces.llm import LLMEventType, LLMStreamEvent
@@ -146,6 +150,7 @@ class QueryLoopRuntime:
         session_id: str,
         agent_max_iterations: Optional[int],
         model_info: ModelRequestInfo,
+        start_iteration: int = 0,
     ) -> AsyncIterator[StreamEvent]:
         # 解析获取当前模型的 LLMProvider
         llm_provider = self._llm_provider_resolver.resolve(model_info)
@@ -162,7 +167,8 @@ class QueryLoopRuntime:
         model_info = model_info.with_runtime_options(runtime_options)
 
         # 进入多轮循环
-        for iteration in range(agent_max_iterations or settings.AGENT_MAX_ITERATIONS):
+        max_iterations = agent_max_iterations or settings.AGENT_MAX_ITERATIONS
+        for iteration in range(start_iteration, max_iterations):
             step_finish_event: Optional[StepFinishEvent] = None
             # 把当前 messages、模型参数 和 tool_scope 委派给 _run_single_step()
             # 然后异步消费它的产出
@@ -180,7 +186,7 @@ class QueryLoopRuntime:
                 yield item
 
             assert step_finish_event is not None
-            if step_finish_event.is_finished:
+            if step_finish_event.is_finished or step_finish_event.resume_requirement is not None:
                 return
             else:
                 # 统一追加消息并决定是否继续下一轮
@@ -294,30 +300,90 @@ class QueryLoopRuntime:
                 input=invocation.tool_call_arguments,
             )
 
-        # 通过工具 core 并发执行并归约结果
-        tool_outputs = await self._tool_dispatcher.dispatch(invocations, tool_scope)
-
-        for result in tool_outputs.results:
-            tool = tool_scope.get(result.tool_invocation.tool_name)
-            result = tool_result_renderer(result, tool.definition if tool else None)
-
-            yield ToolOutputAvailableEvent(
-                call_id=result.tool_call_id,
-                output=result.tool_output,
-            )
-            new_messages.append(
-                ChatMessage(
-                    session_id=session_id,
-                    role=Role.TOOL,
-                    tool_call_id=result.tool_call_id,
-                    tool_name=result.tool_name,
-                    content=result.tool_output,
-                    persisted_output_placeholder=result.persisted_output_placeholder,
+        # 把tool_invocations 分组为 approval_required, server, client
+        groups = group_tool_invocations(invocations, tool_scope)
+        if groups.approval_required:
+            for invocation in groups.approval_required:
+                tool = tool_scope.get(invocation.tool_name)
+                yield ToolApprovalRequiredEvent(
+                    call_id=invocation.tool_call_id,
+                    tool_name=invocation.tool_name,
+                    risk_level=tool.definition.policy.risk_level.value,
+                    input=invocation.tool_call_arguments,
+                    description=tool.definition.llm_spec.description,
                 )
+            yield StepFinishEvent(
+                is_finished=False,
+                intermediate_messages=new_messages,
+                token_usage=token_usage,
+                resume_requirement=StepResumeRequirement(
+                    suspend_reason=SuspendedChatReason.TOOL_APPROVAL,
+                    resume_context=groups,
+                ),
             )
+            return
+
+        server_events, server_messages = await self.execute_server_tool_invocations(
+            groups.server,
+            tool_scope,
+            session_id,
+        )
+        for event in server_events:
+            yield event
+        new_messages.extend(server_messages)
+
+        if groups.client:
+            yield StepFinishEvent(
+                is_finished=False,
+                intermediate_messages=new_messages,
+                token_usage=token_usage,
+                resume_requirement=StepResumeRequirement(
+                    suspend_reason=SuspendedChatReason.CLIENT_TOOL_RESULT,
+                    resume_context=groups,
+                ),
+            )
+            return
 
         # 结束本轮并继续下一轮模型推理（因为调用工具）
         yield StepFinishEvent(is_finished=False, intermediate_messages=new_messages, token_usage=token_usage)
+
+    async def execute_server_tool_invocations(
+        self,
+        invocations: list[ToolInvocation],
+        tool_scope: ToolScope,
+        session_id: str,
+    ) -> tuple[list[StreamEvent], list[ChatMessage]]:
+        if not invocations:
+            return [], []
+
+        tool_outputs = await self._tool_dispatcher.dispatch(invocations, tool_scope)
+        events: list[StreamEvent] = []
+        messages: list[ChatMessage] = []
+        for execution_result in tool_outputs.results:
+            tool = tool_scope.get(execution_result.tool_invocation.tool_name)
+            rendered = tool_result_renderer(
+                execution_result,
+                tool.definition if tool else None,
+            )
+            if execution_result.tool_execution_error is not None:
+                events.append(ToolOutputErrorEvent(
+                    call_id=rendered.tool_call_id,
+                    error_text=str(execution_result.tool_execution_error),
+                ))
+            else:
+                events.append(ToolOutputAvailableEvent(
+                    call_id=rendered.tool_call_id,
+                    output=rendered.tool_output,
+                ))
+            messages.append(ChatMessage(
+                session_id=session_id,
+                role=Role.TOOL,
+                tool_call_id=rendered.tool_call_id,
+                tool_name=rendered.tool_name,
+                content=rendered.tool_output,
+                persisted_output_placeholder=rendered.persisted_output_placeholder,
+            ))
+        return events, messages
 
     async def _emit_exhausted_warning(
         self, session_id: str

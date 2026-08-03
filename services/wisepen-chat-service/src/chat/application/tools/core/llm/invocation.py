@@ -1,6 +1,11 @@
 ﻿import json
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+from chat.application.tools.core.definition import ToolExecutionTarget, ToolRiskLevel
+
+if TYPE_CHECKING:
+    from chat.application.tools.core.registry import ToolScope
 
 from common.logger import warn
 
@@ -20,6 +25,37 @@ class ToolInvocation:
     tool_call_arguments: dict[str, Any]
     query_loop_iteration: int | None = None
     # metadata: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class ToolInvocationGroups:
+    approval_required: list[ToolInvocation]
+    server: list[ToolInvocation]
+    client: list[ToolInvocation]
+
+
+def group_tool_invocations(
+    invocations: list[ToolInvocation],
+    tool_scope: "ToolScope",
+) -> ToolInvocationGroups:
+    approval_required: list[ToolInvocation] = []
+    server: list[ToolInvocation] = []
+    client: list[ToolInvocation] = []
+
+    for invocation in invocations:
+        tool = tool_scope.get(invocation.tool_name)
+        if tool is not None and tool.definition.policy.execution_target == ToolExecutionTarget.CLIENT:
+            client.append(invocation)
+        elif tool is not None and tool.definition.policy.risk_level == ToolRiskLevel.HIGH:
+            approval_required.append(invocation)
+        else:
+            server.append(invocation)
+
+    return ToolInvocationGroups(
+        approval_required=approval_required,
+        server=server,
+        client=client,
+    )
 
 
 def tool_call_parse(accumulators: dict[int, ToolCallMessageAccumulator], *, query_loop_iteration: int | None = None) -> list[ToolInvocation]:

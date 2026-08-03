@@ -6,6 +6,8 @@ from chat.application.agents import AgentMemoryPolicy
 from chat.application.chat_context_assembler import WindowedMessages
 from chat.application.token_counter import TokenCounter
 from common.logger import error
+from common.core.exceptions import ServiceException
+from chat.domain.error_codes import ChatErrorCode
 
 from chat.core.config.app_settings import settings
 from chat.domain.entities import ChatMessage, Role
@@ -41,6 +43,33 @@ class ChatTurnFinalizer:
         self.hot_context_repo = hot_context_repo
         self.provider_repo = provider_repo
         self.kafka_producer = kafka_producer
+
+    async def persist_message_and_token_bill(
+        self,
+        user_id: str,
+        session_id: str,
+        chat_record_messages: List[ChatMessage],
+        memory_policy: AgentMemoryPolicy,
+        model_info: ModelRequestInfo,
+        token_usage: int,
+        group_id: Optional[str] = None,
+    ) -> None:
+        """完成正式消息持久化，并在成功后执行计费。"""
+        await self.persist_messages(
+            user_id=user_id,
+            session_id=session_id,
+            chat_record_messages=chat_record_messages,
+            memory_policy=memory_policy,
+        )
+        try:
+            await self.send_token_billing(
+                user_id=user_id,
+                model_info=model_info,
+                token_usage=token_usage,
+                group_id=group_id,
+            )
+        except Exception as exc:
+            error("chat token billing failed.", session_id=session_id, exc=exc)
 
     async def send_token_billing(
         self,
@@ -113,6 +142,7 @@ class ChatTurnFinalizer:
                 await self.message_repo.save_messages(chat_record_messages)
             except Exception as e:
                 error("chat record message archive failed.", session_id=session_id, exc=e)
+                raise ServiceException(ChatErrorCode.CHAT_MESSAGE_PERSIST_FAILED) from e
 
         # Memory 摄入 (摄入占位符处理的消息内容)
         if memory_policy.enable_long_term_memory:

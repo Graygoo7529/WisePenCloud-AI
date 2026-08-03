@@ -16,6 +16,11 @@ class ToolRiskLevel(StrEnum):
     MEDIUM = "medium"
     HIGH = "high"
 
+
+class ToolExecutionTarget(StrEnum):
+    SERVER = "server"
+    CLIENT = "client"
+
 @dataclass(frozen=True)
 class ToolParametersSchema:
     raw: dict[str, Any]
@@ -120,6 +125,7 @@ class ToolPolicy:
     persisted_output_placeholder_factory: Callable[[dict, Any], str | None] = lambda tool_call_arguments, output: None # 持久化输出的占位生成器
 
     risk_level: ToolRiskLevel = ToolRiskLevel.LOW # 风险级别
+    execution_target: ToolExecutionTarget = ToolExecutionTarget.SERVER # 工具执行端
 
     required_context_keys: tuple[str, ...] = () # 需要的上下文 Key
     required_allowed_builtin_skill_ids: tuple[str, ...] = () # 需要的内置 Skill

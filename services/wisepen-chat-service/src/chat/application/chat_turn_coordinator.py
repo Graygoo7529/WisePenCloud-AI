@@ -1,4 +1,4 @@
-﻿from typing import Optional, List, Dict, Any, Set
+from typing import Optional, List, Dict, Any, Set
 from beanie import PydanticObjectId
 from fastapi import BackgroundTasks
 
@@ -23,6 +23,11 @@ from chat.api.vercel_sse_mapper import to_vercel_sse
 from chat.application.chat_turn_finalizer import ChatTurnFinalizer
 from chat.application.tools.skill_tools.utils.skill_matcher import SkillMatcher
 from chat.application.tools.core import ToolRegistry
+from chat.application.tools.client_tools import PageClientToolCapability
+from chat.application.suspended_chat_service import SuspendedChatService
+from chat.application.session_turn_lock import SessionTurnLock
+from chat.application.tool_resume_outcomes import ClientToolResult, ToolApprovalDecision
+from chat.application.suspended_turn_runtime import SuspendedTurnRuntime
 from common.kafka.producer import KafkaProducerClient
 
 
@@ -34,7 +39,7 @@ _SESSION_TOOL_NAMES = frozenset({"get_historical_chat_messages"})
 class ChatTurnCoordinator:
     """
     Chat协调器：负责编排聊天流程中的各个环节，包含上下文管理、LLM ReAct、记忆更新等。
-    公共入口 handle_chat 方法实现了从接收用户输入到生成响应的完整流程，支持异步流式输出和后置处理任务
+    公共入口 handle_start 方法实现了从接收用户输入到生成响应的完整流程，支持异步流式输出和后置处理任务
     """
 
     def __init__(
@@ -51,6 +56,8 @@ class ChatTurnCoordinator:
             tool_registry: ToolRegistry,
             kafka_producer: KafkaProducerClient,
             skill_matcher: SkillMatcher,
+            suspended_chat_service: SuspendedChatService,
+            session_turn_lock: SessionTurnLock,
             agent_resolver: AgentResolver | None = None,
     ):
         self._memory = memory
@@ -74,11 +81,20 @@ class ChatTurnCoordinator:
         )
         self._skill_matcher = skill_matcher
         self._agent_resolver = agent_resolver or DefaultAgentResolver()
+        self._suspended_chat_service = suspended_chat_service
+        self._session_turn_lock = session_turn_lock
+        self._suspended_turn_runtime = SuspendedTurnRuntime(
+            suspended_chat_service=suspended_chat_service,
+            session_turn_lock=session_turn_lock,
+            tool_registry=tool_registry,
+            query_loop_runtime=self._query_loop_runtime,
+            turn_finalizer=self._turn_finalizer,
+        )
 
     # -------------------------------------------------------------------------
     # 公共入口
     # -------------------------------------------------------------------------
-    async def handle_chat(
+    async def handle_start(
             self,
             user_id: str,
             session_id: str,
@@ -93,6 +109,7 @@ class ChatTurnCoordinator:
             user_defined_deny_tool_names: Optional[Set[str]] = None,
             user_defined_on_demand_skill_ids: Optional[Set[str]] = None,
             user_defined_force_enabled_skill_ids: Optional[Set[str]] = None,
+            page_client_tool_capabilities: list[PageClientToolCapability] | None = None,
     ):
         # 获取当前对话的 Agent
         session = await self._session_repo.get_session_for_user(session_id, user_id)
@@ -102,6 +119,14 @@ class ChatTurnCoordinator:
         memory_policy = agent_spec.memory_policy
         tool_and_skill_policy = agent_spec.tool_and_skill_policy
         model_policy = agent_spec.model_policy
+
+        # 关闭此前所有未完成的 SuspendedChat
+        async with self._session_turn_lock.hold(session_id):
+            await self._suspended_turn_runtime.close_unfinished_before_start(
+                user_id=user_id,
+                session_id=session_id,
+                background_tasks=background_tasks,
+            )
 
         # 如果禁止覆盖，且指定了模型和供应商
         if not model_policy.allow_request_override:
@@ -205,7 +230,8 @@ class ChatTurnCoordinator:
             expose_tool_name_set=expose_tool_name_set,
             allow_tool_name_set=allow_tool_name_set,
             deny_tool_name_set=deny_tool_name_set,
-            user_id=user_id
+            user_id=user_id,
+            page_client_tool_capabilities=page_client_tool_capabilities,
         )
 
         # 对话中的全部附件
@@ -258,10 +284,36 @@ class ChatTurnCoordinator:
                     if not event.is_finished:
                         # 向 chat_record_messages 追加中间消息（Tool Calls）
                         chat_record_messages.extend(event.intermediate_messages)
+                        # SSE流需要中断
+                        if event.resume_requirement is not None:
+                            messages_for_llm.extend(event.intermediate_messages)
+                            context_data = self._suspended_turn_runtime.build_context(
+                                turn_messages=chat_record_messages,
+                                llm_messages=messages_for_llm,
+                                tool_scope=tool_scope,
+                                model_info=resolved_model_info,
+                                agent_spec=agent_spec,
+                                memory_policy=memory_policy,
+                                token_usage=token_usage,
+                                user_query=user_query,
+                                session_summary=session_summary,
+                                windowed_history_messages=windowed_history_messages,
+                                resume_requirement=event.resume_requirement,
+                            )
+                            await self._suspended_chat_service.save_waiting_turn(
+                                user_id=user_id,
+                                session_id=session_id,
+                                requirement=event.resume_requirement,
+                                context_data=context_data,
+                            )
                     else:
                         # 向 chat_record_messages 追加最终回复消息
                         chat_record_messages.append(event.final_assistant_message)
                 yield to_vercel_sse(event)
+
+                # 切断SSE流
+                if isinstance(event, StepFinishEvent) and event.resume_requirement is not None:
+                    return
         except ServiceException as e:
             error("chat stream generation failed.", session_id=session_id, exc=e)
             yield to_vercel_sse(ErrorEvent(error_text=str(e)))
@@ -269,24 +321,18 @@ class ChatTurnCoordinator:
 
         # 使用 FastAPI 的 BackgroundTasks 在响应返回给用户后，异步执行
         if background_tasks is not None:
-            # 发送Token计费
             background_tasks.add_task(
-                self._turn_finalizer.send_token_billing,
-                user_id=user_id,
-                model_info=resolved_model_info,
-                token_usage=token_usage,
-                group_id=agent_spec.billing_group_id
-            )
-            # 将新消息写入 Redis 和 MongoDB，并摄入 Memory 长期记忆
-            background_tasks.add_task(
-                self._turn_finalizer.persist_messages,
+                self._turn_finalizer.persist_message_and_token_bill,
                 user_id=user_id,
                 session_id=session_id,
                 chat_record_messages=chat_record_messages,
                 memory_policy=memory_policy,
+                model_info=resolved_model_info,
+                token_usage=token_usage,
+                group_id=agent_spec.billing_group_id,
             )
             # 调用轻量级模型生成并更新会话的全局摘要
-            if memory_policy.enable_chat_memory and memory_policy.enable_chat_memory_summary and windowed_history_messages.needs_compression:
+            if memory_policy.enable_chat_memory and memory_policy.enable_chat_memory_summary and windowed_history_messages is not None and windowed_history_messages.needs_compression:
                 background_tasks.add_task(
                     self._turn_finalizer.summarize_and_compress,
                     session_id=session_id,
@@ -301,3 +347,32 @@ class ChatTurnCoordinator:
                     self._turn_finalizer.auto_generate_title,
                     session_id=session_id, user_id=user_id, user_query=user_query
                 )
+
+    async def handle_resume(
+        self,
+        user_id: str,
+        session_id: str,
+        tool_results: list[ClientToolResult],
+        background_tasks: BackgroundTasks,
+    ):
+        async for event in self._suspended_turn_runtime.resume(
+            user_id=user_id,
+            session_id=session_id,
+            tool_results=tool_results,
+            background_tasks=background_tasks,
+        ):
+            yield to_vercel_sse(event)
+    async def handle_approval(
+        self,
+        user_id: str,
+        session_id: str,
+        decisions: list[ToolApprovalDecision],
+        background_tasks: BackgroundTasks,
+    ):
+        async for event in self._suspended_turn_runtime.approval(
+            user_id=user_id,
+            session_id=session_id,
+            decisions=decisions,
+            background_tasks=background_tasks,
+        ):
+            yield to_vercel_sse(event)

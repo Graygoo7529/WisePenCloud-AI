@@ -1,4 +1,5 @@
 from .mongo.message_repository import MongoMessageRepository
+from .mongo.suspended_chat_repository import MongoSuspendedChatRepository
 from .mongo.session_repository import MongoSessionRepository
 from .mongo.model_repository import MongoModelRepository
 from .mongo.provider_repository import MongoProviderRepository
@@ -9,6 +10,7 @@ from .redis.mcp_tool_discovery_cache import RedisMcpToolDiscoveryCache
 
 __all__ = [
     "MongoMessageRepository",
+    "MongoSuspendedChatRepository",
     "MongoSessionRepository",
     "MongoModelRepository",
     "MongoProviderRepository",

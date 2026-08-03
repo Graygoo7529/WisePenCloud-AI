@@ -2,7 +2,7 @@
 import uuid
 
 from beanie import PydanticObjectId
-from fastapi import APIRouter, Depends, BackgroundTasks, HTTPException
+from fastapi import APIRouter, Depends, BackgroundTasks
 from fastapi.responses import StreamingResponse
 from dependency_injector.wiring import inject, Provide
 
@@ -12,16 +12,20 @@ from chat.api.vercel_formats import (
 
 from common.security import require_login
 from common.logger import error, info
-from chat.api.schemas.chat import ChatRequest
+from chat.api.schemas.chat import ChatApprovalRequest, ChatRequest, ChatResumeRequest
 from chat.application.chat_turn_coordinator import ChatTurnCoordinator
+from chat.application.tool_resume_outcomes import ClientToolResult, ToolApprovalDecision
+from chat.application.tools.client_tools import PageClientToolCapability
 from chat.container import Container
 from chat.core.config.app_settings import settings
 from chat.domain.repositories import SessionRepository
+from chat.domain.error_codes import ChatErrorCode
+from common.core.exceptions import ServiceException
 
 router = APIRouter()
 
 
-async def _vercel_generator(chat_gen, model_name: str):
+async def _vercel_generator(chat_gen):
     """将 coordinator 的 AsyncGenerator 包装成 AI SDK 6.x SSE 格式"""
     message_id = f"msg_{uuid.uuid4().hex}"
     try:
@@ -66,17 +70,17 @@ async def chat_completions(
         session_repo: SessionRepository = Depends(Provide[Container.session_repo]),
 ):
     if not req.query:
-        raise HTTPException(status_code=400, detail="缺少查询内容")
+        raise ServiceException(ChatErrorCode.CHAT_REQUEST_INVALID)
 
     if not req.session_id:
-        raise HTTPException(status_code=400, detail="缺少 session_id")
+        raise ServiceException(ChatErrorCode.CHAT_REQUEST_INVALID)
 
     resolved_model_id = PydanticObjectId(req.model or settings.DEFAULT_MODEL_ID)
     resolved_provider_id = PydanticObjectId(req.provider_id) if req.provider_id else None
 
     await session_repo.get_session_for_user(req.session_id, user_id)
 
-    chat_gen = coordinator.handle_chat(
+    chat_gen = coordinator.handle_start(
         user_id=user_id,
         session_id=req.session_id,
         user_query=req.query,
@@ -90,15 +94,76 @@ async def chat_completions(
         user_defined_deny_tool_names=req.user_defined_deny_tool_names,
         user_defined_on_demand_skill_ids=req.user_defined_on_demand_skill_ids,
         user_defined_force_enabled_skill_ids=req.user_defined_force_enabled_skill_ids,
+        page_client_tool_capabilities=[
+            PageClientToolCapability(
+                name=item.name,
+                description=item.description,
+                input_schema=item.input_schema,
+            )
+            for item in req.page_client_tool_capabilities
+        ],
     )
 
     return StreamingResponse(
-        _vercel_generator(chat_gen, str(resolved_model_id)),
+        _vercel_generator(chat_gen),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
             "X-Accel-Buffering": "no",
             "x-vercel-ai-ui-message-stream": "v1",
         },
+    )
+
+
+@router.post("/resume", summary="提交客户端工具结果并恢复对话")
+@inject
+async def chat_resume(
+        req: ChatResumeRequest,
+        background_tasks: BackgroundTasks,
+        user_id: str = Depends(require_login),
+        coordinator: ChatTurnCoordinator = Depends(Provide[Container.chat_turn_coordinator]),
+        session_repo: SessionRepository = Depends(Provide[Container.session_repo]),
+):
+    await session_repo.get_session_for_user(req.session_id, user_id)
+    chat_gen = coordinator.handle_resume(
+        user_id=user_id,
+        session_id=req.session_id,
+        tool_results=[
+            ClientToolResult(
+                tool_call_id=item.tool_call_id,
+                output=item.output,
+                error_text=item.error_text,
+            )
+            for item in req.tool_results
+        ],
+        background_tasks=background_tasks,
+    )
+    return StreamingResponse(
+        _vercel_generator(chat_gen),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no", "x-vercel-ai-ui-message-stream": "v1"},
+    )
+
+
+@router.post("/approval", summary="提交高危工具审批结果并恢复对话")
+@inject
+async def chat_approval(
+        req: ChatApprovalRequest,
+        background_tasks: BackgroundTasks,
+        user_id: str = Depends(require_login),
+        coordinator: ChatTurnCoordinator = Depends(Provide[Container.chat_turn_coordinator]),
+        session_repo: SessionRepository = Depends(Provide[Container.session_repo]),
+):
+    await session_repo.get_session_for_user(req.session_id, user_id)
+    chat_gen = coordinator.handle_approval(
+        user_id=user_id,
+        session_id=req.session_id,
+        decisions=[ToolApprovalDecision(tool_call_id=item.tool_call_id, approved=item.approved) for item in req.decisions],
+        background_tasks=background_tasks,
+    )
+    return StreamingResponse(
+        _vercel_generator(chat_gen),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no", "x-vercel-ai-ui-message-stream": "v1"},
     )
 
