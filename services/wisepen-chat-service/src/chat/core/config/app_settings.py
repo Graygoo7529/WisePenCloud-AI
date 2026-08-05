@@ -86,6 +86,11 @@ class AppSettings(BaseModel):
     # 默认长期记忆召回阈值
     CTX_LONG_TERM_MEMORY_THRESHOLD: int = 0.6
 
+    # 单轮视觉输入限制，避免附件上限（100MB）直接放大为 Base64 内存占用
+    VISION_MAX_IMAGE_COUNT: int = 10
+    VISION_MAX_IMAGE_BYTES: int = 5 * 1024 * 1024
+    VISION_MAX_TOTAL_IMAGE_BYTES: int = 12 * 1024 * 1024
+
     # Agentic ReAct 循环
     # ReAct 最大推理迭代次数，防止工具调用产生无限循环
     AGENT_MAX_ITERATIONS: int = 5

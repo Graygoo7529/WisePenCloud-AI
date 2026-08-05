@@ -27,6 +27,13 @@ class ToolCallMessage(BaseModel):
     arguments: dict[str, Any] = Field(default_factory=dict)
 
 
+class InlineImage(BaseModel):
+    """仅用于单次模型调用的内联图片，不参与消息持久化。"""
+    attachment_id: str
+    media_type: str
+    base64_data: str
+
+
 class MessageModelInfo(BaseModel):
     """消息持久化用的模型安全快照"""
     model_id: str
@@ -80,6 +87,9 @@ class ChatMessage(Document):
 
     content: Optional[str] = None   # 返回内容
     content_token_count: int = 0 # 消息 token 计数，用于上下文压缩
+
+    # 仅运行时使用，由 Provider 适配器投影为各自的多模态输入协议
+    imgs: List[InlineImage] = Field(default_factory=list, exclude=True)
 
     # 内容搜索分词，用于规避 MongoDB 中文分词缺陷
     content_search_tokens: Optional[str] = None

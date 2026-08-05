@@ -39,7 +39,7 @@ class FileStorageClient:
         md5: str,
         extension: str,
         scene: str,
-        biz_path: str,
+        biz_tag: str,
         config_id: Optional[int],
         expected_size: int,
     ) -> UploadInitResponse:
@@ -50,7 +50,7 @@ class FileStorageClient:
                 "md5": md5,
                 "extension": extension,
                 "scene": scene,
-                "bizPath": biz_path,
+                "bizTag": biz_tag,
                 "configId": config_id,
                 "expectedSize": expected_size,
             },
@@ -96,7 +96,7 @@ class FileStorageClient:
 
     # 删除文件接口
     async def delete_file(self, object_key: str) -> None:
-        await self._rpc.post(
+        await self._rpc.delete(
             self._service_name,
             _DELETE_FILE_URL_PATH,
             json=[object_key],

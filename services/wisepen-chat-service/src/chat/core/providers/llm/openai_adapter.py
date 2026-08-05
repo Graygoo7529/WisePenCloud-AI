@@ -177,9 +177,16 @@ class OpenAIAdapter(LLMProvider):
                 continue
             # 对于用户消息，或其他非 OpenAI Responses 提供的消息
             role = "assistant" if msg.role == Role.ASSISTANT else "user"
+            content: Any = msg.content or ""
+            if msg.imgs:
+                content = [{"type": "input_text", "text": msg.content or ""}]
+                content.extend({
+                    "type": "input_image",
+                    "image_url": f"data:{img.media_type};base64,{img.base64_data}",
+                } for img in msg.imgs)
             items.append({
                 "role": role,
-                "content": msg.content or ""
+                "content": content,
             })
         return items, instructions, None
 

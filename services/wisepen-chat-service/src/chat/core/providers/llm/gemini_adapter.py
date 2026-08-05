@@ -1,3 +1,4 @@
+import base64
 import uuid
 from typing import Any, AsyncGenerator, Dict, List, Optional
 
@@ -153,7 +154,12 @@ class GeminiAdapter(LLMProvider):
                 continue
             # 对于用户消息，或其他非 GEMINI 提供的消息
             role = "model" if msg.role == Role.ASSISTANT else "user"
-            contents.append({"role": role, "parts": [{"text": msg.content or ""}]})
+            parts: list[Any] = [{"text": msg.content or ""}]
+            parts.extend(
+                types.Part.from_bytes(data=base64.b64decode(img.base64_data), mime_type=img.media_type)
+                for img in msg.imgs
+            )
+            contents.append({"role": role, "parts": parts})
         return contents
 
     @staticmethod

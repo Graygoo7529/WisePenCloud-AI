@@ -1,13 +1,26 @@
 ﻿import json
+import base64
 from dataclasses import field, dataclass
 from typing import Any, Dict, List, Optional
 
+from common.core.exceptions import ServiceException
 from common.logger import error, warn
 
 from chat.core.config.app_settings import settings
-from chat.domain.entities import ChatMessage, Role, ChatSession, TemporaryAttachmentRef, ResourceAttachmentRef
+from chat.domain.entities import ChatMessage, InlineImage, Role, ChatSession, TemporaryAttachmentRef, ResourceAttachmentRef
+from chat.domain.error_codes import ChatErrorCode
 from chat.domain.entities.skill import SkillMeta
+from chat.core.providers import OssFileLoader
 from chat.domain.repositories import MessageRepository, HotContextRepository, SessionRepository
+
+
+_IMAGE_MEDIA_TYPES = {
+    "jpeg": "image/jpeg",
+    "jpg": "image/jpeg",
+    "png": "image/png",
+    "webp": "image/webp",
+}
+
 
 @dataclass
 class WindowedMessages:
@@ -27,10 +40,12 @@ class ChatContextAssembler:
         message_repo: MessageRepository,
         session_repo: SessionRepository,
         hot_context_repo: HotContextRepository,
+        oss_file_loader: OssFileLoader,
     ):
         self.message_repo = message_repo
         self.session_repo = session_repo
         self.hot_context_repo = hot_context_repo
+        self.oss_file_loader = oss_file_loader
 
     async def get_chat_history_record_messages(self, session_id: str) -> List[ChatMessage]:
         """
@@ -101,7 +116,59 @@ class ChatContextAssembler:
 
         return windowed_messages
 
-    def assemble_prompt(
+    async def _resolve_query_images(
+        self,
+        temp_attachments: List[TemporaryAttachmentRef],
+        support_vision: bool,
+    ) -> List[InlineImage]:
+        image_refs: List[tuple[TemporaryAttachmentRef, str]] = []
+
+        for ref in temp_attachments:
+            media_type = _IMAGE_MEDIA_TYPES.get(ref.extension.lower())
+            if media_type:
+                image_refs.append((ref, media_type))
+
+        if not image_refs:
+            return []
+        if not support_vision:
+            raise ServiceException(ChatErrorCode.MODEL_VISION_UNSUPPORTED)
+        if len(image_refs) > settings.VISION_MAX_IMAGE_COUNT:
+            raise ServiceException(ChatErrorCode.IMAGE_INPUT_INVALID, custom_msg="too many images in one query")
+        if any(ref.file_size > settings.VISION_MAX_IMAGE_BYTES for ref, _ in image_refs):
+            raise ServiceException(ChatErrorCode.IMAGE_INPUT_INVALID, custom_msg="an image exceeds the size limit")
+        if sum(ref.file_size for ref, _ in image_refs) > settings.VISION_MAX_TOTAL_IMAGE_BYTES:
+            raise ServiceException(ChatErrorCode.IMAGE_INPUT_INVALID, custom_msg="total image size exceeds the limit")
+
+        images: List[InlineImage] = []
+        total_bytes = 0
+        for ref, media_type in image_refs:
+            try:
+                raw = await self.oss_file_loader.load_by_object_key(ref.object_key)
+            except Exception as exc:
+                raise ServiceException(
+                    ChatErrorCode.IMAGE_INPUT_INVALID,
+                    custom_msg=f"failed to load image attachment {ref.attachment_id}",
+                ) from exc
+
+            total_bytes += len(raw)
+            if (
+                not raw
+                or len(raw) > settings.VISION_MAX_IMAGE_BYTES
+                or total_bytes > settings.VISION_MAX_TOTAL_IMAGE_BYTES
+            ):
+                raise ServiceException(
+                    ChatErrorCode.IMAGE_INPUT_INVALID,
+                    custom_msg="loaded image data exceeds the limit",
+                )
+            images.append(InlineImage(
+                attachment_id=ref.attachment_id,
+                media_type=media_type,
+                base64_data=base64.b64encode(raw).decode("ascii"),
+            ))
+
+        return images
+
+    async def assemble_prompt(
         self,
         session_id: str,
         user_query: str,
@@ -114,6 +181,7 @@ class ChatContextAssembler:
         temp_attachments: Optional[List[TemporaryAttachmentRef]] = None,
         resource_attachments: Optional[List[ResourceAttachmentRef]] = None,
         user_defined_attachment_ids: Optional[List[str]] = None,
+        support_vision: bool = False,
     ) -> List[ChatMessage]:
         """组装最终发往 LLM 的消息列表"""
 
@@ -204,13 +272,17 @@ class ChatContextAssembler:
         else:
             final_user_content = user_query
 
+        query_images = await self._resolve_query_images(
+            temp_attachments or [],
+            support_vision=support_vision,
+        )
+
         # 该 Message 不持久化
         messages.append(ChatMessage(
             session_id=session_id,
             role=Role.USER,
             content=final_user_content,
+            imgs=query_images,
         ))
 
         return messages
-
-

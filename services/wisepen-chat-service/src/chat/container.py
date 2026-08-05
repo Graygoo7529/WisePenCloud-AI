@@ -233,6 +233,7 @@ class Container(containers.DeclarativeContainer):
         skill_matcher=skill_matcher,
         suspended_chat_repo=suspended_chat_repo,
         agent_resolver=agent_resolver,
+        oss_file_loader=oss_file_loader,
     )
 
     chat_turn_stream_manager = providers.Singleton(

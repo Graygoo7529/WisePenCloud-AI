@@ -81,9 +81,16 @@ class LiteLLMAdapter(LLMProvider, TextCompletionProvider):
                 })
                 continue
             # 对于用户消息，或其他非 LiteLLM 提供的消息
+            content: Any = message.content or ""
+            if message.imgs:
+                content = [{"type": "text", "text": message.content or ""}]
+                content.extend({
+                    "type": "image_url",
+                    "image_url": {"url": f"data:{img.media_type};base64,{img.base64_data}"},
+                } for img in message.imgs)
             formatted_messages.append({
                 "role": message.role.value,
-                "content": message.content or ""
+                "content": content,
             })
         return formatted_messages
 

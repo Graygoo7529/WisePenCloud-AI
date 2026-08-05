@@ -13,6 +13,7 @@ from chat.core.config.app_settings import settings
 from chat.domain.entities import ChatMessage, Role
 from chat.application.llm_provider_resolver import LLMProviderResolver
 from chat.application.token_counter import TokenCounter
+from chat.core.providers import OssFileLoader
 from chat.domain.interfaces.llm import TextCompletionProvider
 from chat.domain.interfaces.memory import MemoryProvider
 from chat.domain.repositories import SessionRepository, MessageRepository, HotContextRepository, ModelRepository, \
@@ -73,13 +74,15 @@ class ChatTurnCoordinator:
             tool_registry: ToolRegistry,
             kafka_producer: KafkaProducerClient,
             skill_matcher: SkillMatcher,
+            oss_file_loader: OssFileLoader,
             agent_resolver: AgentResolver | None = None,
     ):
         self._memory = memory
         self._model_repo = model_repo
         self._session_repo = session_repo
         self._context_assembler = ChatContextAssembler(
-            message_repo=message_repo, session_repo=session_repo, hot_context_repo=hot_context_repo
+            message_repo=message_repo, session_repo=session_repo, hot_context_repo=hot_context_repo,
+            oss_file_loader=oss_file_loader
         )
         self._tool_registry = tool_registry
         self._query_loop_runtime = QueryLoopRuntime(
@@ -286,7 +289,7 @@ class ChatTurnCoordinator:
 
         # 提示词组装
         # 将系统提示词、Mem0 检索到的事实、会话的历史摘要、前端上下文以及窗口内的未压缩明细消息组装成 LLM 所需的格式
-        chat_turn_context.messages_for_llm = self._context_assembler.assemble_prompt(
+        chat_turn_context.messages_for_llm = await self._context_assembler.assemble_prompt(
             session_id=session_id,
             user_query=user_query,
             system_prompt=chat_turn_context.agent_spec.system_prompt,  # 系统提示词
@@ -298,6 +301,7 @@ class ChatTurnCoordinator:
             temp_attachments=temp_attachments, # 对话中的全部临时附件
             resource_attachments=resource_attachments, # 对话中的全部资源附件
             user_defined_attachment_ids=user_defined_attachment_ids, # 用户指定的附件
+            support_vision=chat_turn_context.model_info.model.support_vision,
         )
 
         # 构造 chat_record_messages

@@ -43,18 +43,18 @@ async def init_temp_attachment_upload(
     session_repo: SessionRepository = Depends(Provide[Container.session_repo]),
     file_storage_client: FileStorageClient = Depends(Provide[Container.file_storage_client])
 ):
-    biz_path = f"{user_id}/{req.session_id}"
+    session = await session_repo.get_session_for_user(req.session_id, user_id)
+    biz_tag = f"{user_id}/{req.session_id}"
 
     init_upload_res = await file_storage_client.init_upload(
         md5=req.md5,
         extension=req.extension,
         scene="PRIVATE_AI_ATTACHMENT",
-        biz_path=biz_path,
+        biz_tag=biz_tag,
         config_id=None,
         expected_size=req.file_size,
     )
 
-    session = await session_repo.get_session_for_user(req.session_id, user_id)
     # 构建 attachment_id
     attachment_id = uuid.uuid4().hex
 

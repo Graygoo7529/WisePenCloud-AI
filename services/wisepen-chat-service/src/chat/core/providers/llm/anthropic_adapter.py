@@ -162,9 +162,20 @@ class AnthropicAdapter(LLMProvider):
                 })
                 continue
             # 对于用户消息，或其他非 ANTHROPIC 提供的消息
+            content: Any = msg.content or ""
+            if msg.imgs:
+                content = [{"type": "text", "text": msg.content or ""}]
+                content.extend({
+                    "type": "image",
+                    "source": {
+                        "type": "base64",
+                        "media_type": img.media_type,
+                        "data": img.base64_data,
+                    },
+                } for img in msg.imgs)
             anthropic_messages.append({
                 "role": "assistant" if msg.role == Role.ASSISTANT else "user",
-                "content": msg.content or ""
+                "content": content,
             })
         return anthropic_messages, anthropic_system_message
 
