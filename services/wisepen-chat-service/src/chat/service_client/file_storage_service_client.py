@@ -16,6 +16,7 @@ _INIT_UPLOAD_URL_PATH = "/internal/storage/initUpload"
 _GET_DOWNLOAD_URL_PATH = "/internal/storage/getDownloadUrl"
 _GET_FILE_RECORD_URL_PATH = "/internal/storage/getFileRecord"
 _DELETE_FILE_URL_PATH = "/internal/storage/deleteFiles"
+_FILE_RECORD_NOT_FOUND_CODE = 7111
 _DEFAULT_DOWNLOAD_DURATION_SECONDS = 900
 
 
@@ -96,8 +97,13 @@ class FileStorageClient:
 
     # 删除文件接口
     async def delete_file(self, object_key: str) -> None:
-        await self._rpc.delete(
-            self._service_name,
-            _DELETE_FILE_URL_PATH,
-            json=[object_key],
-        )
+        try:
+            await self._rpc.delete(
+                self._service_name,
+                _DELETE_FILE_URL_PATH,
+                json=[object_key],
+            )
+        except RpcError as exc:
+            # 删除具有幂等语义：物理记录不存在时，目标状态已经达成。
+            if exc.code != _FILE_RECORD_NOT_FOUND_CODE:
+                raise
