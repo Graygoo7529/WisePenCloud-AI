@@ -33,7 +33,7 @@ router = APIRouter()
 - 约束：当前用户必须已登录；目标会话必须属于当前用户；文件名、后缀、大小和 MD5 必须满足请求模型约束。
 - 处理：向文件存储服务申请 PRIVATE_AI_ATTACHMENT 上传凭证，生成会话内 attachment_id，并把临时附件引用追加到会话；不上传文件字节，不创建资源附件。
 - 失败：未登录 -> PermissionErrorCode.NOT_LOGIN；请求参数校验失败 -> ResultCode.PARAM_ERROR；会话不存在或不属于当前用户 -> ChatErrorCode.SESSION_NOT_FOUND；文件存储服务调用失败 -> ResultCode.SYSTEM_ERROR。
-- 响应：返回附件 ID、objectKey、预签名上传 URL 和回调 header。
+- 响应：返回附件 ID、objectKey、秒传状态、预签名上传 URL 和回调 header；flash_uploaded=true 时无需客户端 PUT。
 """,
 )
 @inject
@@ -76,6 +76,7 @@ async def init_temp_attachment_upload(
         object_key=init_upload_res.object_key,
         put_url=init_upload_res.put_url,
         callback_header=init_upload_res.callback_header,
+        flash_uploaded=init_upload_res.flash_uploaded,
     ))
 
 
