@@ -1,0 +1,112 @@
+import redis.asyncio as redis
+
+from chat.core.config.app_settings import settings
+
+
+_RELEASE_IF_OWNER = """
+if redis.call("GET", KEYS[1]) == ARGV[1] then
+  return redis.call("DEL", KEYS[1])
+else
+  return 0
+end
+"""
+
+# 续租和释放都必须比较 turn_id，避免误操作后续新 turn 的租约
+_RENEW_IF_OWNER = """
+if redis.call("GET", KEYS[1]) == ARGV[1] then
+  return redis.call("EXPIRE", KEYS[1], ARGV[2])
+else
+  return 0
+end
+"""
+
+
+class RedisChatTurnStream:
+    """保存 running turn 租约和可重放 SSE 事件流"""
+
+    def __init__(self) -> None:
+        self.redis = redis.from_url(settings.REDIS_URL, decode_responses=True)
+        self.active_turn_ttl = int(settings.CHAT_ACTIVE_TURN_TTL_SECONDS)
+        self.stream_ttl = int(settings.CHAT_TURN_STREAM_TTL_SECONDS)
+
+    def _active_turn_key(self, user_id: str, session_id: str) -> str:
+        return f"chat:session:{user_id}:{session_id}:active_turn"
+
+    def _stream_key(self, turn_id: str) -> str:
+        return f"chat:turn:{turn_id}:events"
+
+    async def acquire_active_turn(self, user_id: str, session_id: str, turn_id: str) -> bool:
+        # 原子写入，等价于 Redis 命令 SET chat:session:{user_id}:{session_id}:active_turn {turn_id} NX EX 1800
+        # key 表示 这个用户的这个会话当前正在跑哪个 turn，用于防止一个会话有多个 trun 出现
+        return bool(await self.redis.set(
+            self._active_turn_key(user_id, session_id),
+            turn_id,
+            nx=True, # 只有 key 不存在时才写入，避免发生竞态问题
+            ex=self.active_turn_ttl, # 运行期租约，防止后端进程崩溃、机器重启、runner 异常死亡时，session 永远被占住
+        ))
+
+    async def get_active_turn(self, user_id: str, session_id: str) -> str | None:
+        # 获取当前对话的 turn
+        return await self.redis.get(self._active_turn_key(user_id, session_id))
+
+    async def renew_active_turn(self, user_id: str, session_id: str, turn_id: str) -> bool:
+        # 续期当前对话的 turn
+        result = await self.redis.eval(
+            _RENEW_IF_OWNER,
+            1,
+            self._active_turn_key(user_id, session_id),
+            turn_id,
+            self.active_turn_ttl,
+        )
+        return bool(result)
+
+    async def release_active_turn(self, user_id: str, session_id: str, turn_id: str) -> bool:
+        # 释放当前对话的 turn，在 turn 自然结束或被中止后
+        result = await self.redis.eval(
+            _RELEASE_IF_OWNER,
+            1,
+            self._active_turn_key(user_id, session_id),
+            turn_id,
+        )
+        return bool(result)
+
+    async def append_frame(self, turn_id: str, frame: str, *, terminal: bool = False) -> str:
+        # 将一个 SSE frame 写到当前 turn 的事件流里
+        stream_key = self._stream_key(turn_id)
+        event_id = await self.redis.xadd(
+            stream_key,
+            {
+                "frame": frame, # 原样保存
+                "terminal": "1" if terminal else "0",
+            },
+        )
+        # 等价于 Redis：XADD chat:turn:turn_xxx:events * frame "data: {...}\n\n" terminal 0
+        await self.redis.expire(stream_key, self.stream_ttl)
+        return event_id
+
+    async def iter_frames(self, turn_id: str):
+        # 读取某个 turn 的 SSE frame，先 replay 已有事件，再等待新事件
+        stream_key = self._stream_key(turn_id)
+        last_id = "0-0"
+
+        # 先完整重放已有事件，再阻塞等待新事件，支持页面断开后重新订阅
+        entries = await self.redis.xrange(stream_key, min="-", max="+") # XRANGE - + 是读取这个 stream 里已有的所有事件
+        for event_id, fields in entries:
+            last_id = event_id
+            yield fields.get("frame") or "", fields.get("terminal") == "1"
+            if fields.get("terminal") == "1":
+                return # turn 已经结束，直接 return，不再等待新事件
+
+        # 如果已有事件重放完了，但还没结束，就进入循环
+        while True:
+            # 从 last_id 之后继续读，如果暂时没有新事件，最多等 15 秒，一次最多读 50 条
+            result = await self.redis.xread({stream_key: last_id}, block=15000, count=50)
+            if not result:
+                continue # 继续循环
+
+            for _, stream_entries in result:
+                for event_id, fields in stream_entries:
+                    last_id = event_id
+                    yield fields.get("frame") or "", fields.get("terminal") == "1" # 更新 last_id，把新 frame yield 给浏览器
+                    if fields.get("terminal") == "1":
+                        return # 遇到终止事件，结束订阅

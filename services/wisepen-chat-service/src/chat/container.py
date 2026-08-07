@@ -29,9 +29,11 @@ from chat.core.persistence import (
     MongoSuspendedChatRepository,
     RedisHotContext,
     RedisMcpToolDiscoveryCache,
+    RedisChatTurnStream,
 )
 from chat.domain.repositories import ToolConfigRepository
 from chat.application.chat_turn_coordinator import ChatTurnCoordinator
+from chat.application.chat_turn_stream_manager import ChatTurnStreamManager
 from chat.application.agents import (
     DefaultAgentResolver,
 )
@@ -107,6 +109,7 @@ class Container(containers.DeclarativeContainer):
     mcp_server_config_repo = providers.Singleton(MongoMcpServerConfigRepository)
     hot_context_repo = providers.Singleton(RedisHotContext)
     mcp_tool_discovery_cache_repo = providers.Singleton(RedisMcpToolDiscoveryCache)
+    chat_turn_stream_repo = providers.Singleton(RedisChatTurnStream)
 
     # 内部 RPC：Nacos 服务发现 + 通用 httpx 客户端 + file-storage typed facade
     service_discovery = providers.Singleton(
@@ -230,6 +233,11 @@ class Container(containers.DeclarativeContainer):
         skill_matcher=skill_matcher,
         suspended_chat_repo=suspended_chat_repo,
         agent_resolver=agent_resolver,
+    )
+
+    chat_turn_stream_manager = providers.Singleton(
+        ChatTurnStreamManager,
+        stream_repo=chat_turn_stream_repo,
     )
 
 

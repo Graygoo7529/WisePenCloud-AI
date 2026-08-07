@@ -4,6 +4,10 @@ from pydantic import BaseModel, Field, model_validator
 from chat.application.tools.client_tools import ClientToolCapability
 
 
+class ActiveChatTurnResponse(BaseModel):
+    turn_id: Optional[str] = Field(default=None, description="当前正在运行的 turn ID；不存在时为空。")
+
+
 class ClientToolResultSubmission(BaseModel):
     tool_call_id: str = Field(..., min_length=1, description="客户端工具调用 ID。")
     output: Any | None = Field(default=None, description="客户端工具成功执行结果。")

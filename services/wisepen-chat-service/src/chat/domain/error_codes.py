@@ -8,6 +8,8 @@ class ChatErrorCode(IErrorCode):
     AGENT_NOT_FOUND = (40003, "Agent 不存在或未发布")
     SESSION_AGENT_CHANGE_FORBIDDEN = (40004, "已有消息的会话不能切换 Agent")
     CHAT_REQUEST_INVALID = (40005, "completions 请求参数不合法")
+    CHAT_TURN_IN_PROGRESS = (40006, "当前会话已有正在运行的对话")
+    CHAT_ACTIVE_TURN_NOT_FOUND = (40007, "当前会话没有正在运行的对话")
 
     # --- Provider 相关 ---
     PROVIDER_NOT_FOUND = (40011, "供应商不存在")

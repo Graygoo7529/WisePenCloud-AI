@@ -407,7 +407,7 @@ class ChatTurnCoordinator:
     async def close_unfinished_before_start(self, user_id: str, session_id: str) -> None:
         unfinished_chat: SuspendedChat | None = await self._suspended_chat_repo.find_suspended_by_session(session_id, user_id)
         if unfinished_chat is None:
-            raise ServiceException(ChatErrorCode.SUSPENDED_CHAT_NOT_FOUND)
+            return # 没有未完成的对话，无需关闭
         unfinished_chat_id = str(unfinished_chat.id)
 
         pending_messages = []
