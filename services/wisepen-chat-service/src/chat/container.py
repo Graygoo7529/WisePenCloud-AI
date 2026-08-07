@@ -32,8 +32,6 @@ from chat.core.persistence import (
 )
 from chat.domain.repositories import ToolConfigRepository
 from chat.application.chat_turn_coordinator import ChatTurnCoordinator
-from chat.application.suspended_chat_service import SuspendedChatService
-from chat.core.concurrency import RedisSessionTurnLock
 from chat.application.agents import (
     DefaultAgentResolver,
 )
@@ -106,11 +104,6 @@ class Container(containers.DeclarativeContainer):
     provider_repo = providers.Singleton(MongoProviderRepository)
     tool_config_repo = providers.Singleton(MongoToolConfigRepository)
     suspended_chat_repo = providers.Singleton(MongoSuspendedChatRepository)
-    suspended_chat_service = providers.Factory(
-        SuspendedChatService,
-        suspended_chat_repo=suspended_chat_repo,
-    )
-    session_turn_lock = providers.Singleton(RedisSessionTurnLock)
     mcp_server_config_repo = providers.Singleton(MongoMcpServerConfigRepository)
     hot_context_repo = providers.Singleton(RedisHotContext)
     mcp_tool_discovery_cache_repo = providers.Singleton(RedisMcpToolDiscoveryCache)
@@ -235,8 +228,7 @@ class Container(containers.DeclarativeContainer):
         tool_registry=tool_registry,
         kafka_producer=kafka_producer,
         skill_matcher=skill_matcher,
-        suspended_chat_service=suspended_chat_service,
-        session_turn_lock=session_turn_lock,
+        suspended_chat_repo=suspended_chat_repo,
         agent_resolver=agent_resolver,
     )
 

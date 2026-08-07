@@ -63,7 +63,7 @@ class LiteLLMAdapter(LLMProvider, TextCompletionProvider):
         }
 
     @staticmethod
-    def _litellm_messages_formatter(messages: List[ChatMessage]) -> List[Dict[str, Any]]:
+    def _litemessages_for_llm_formatter(messages: List[ChatMessage]) -> List[Dict[str, Any]]:
         # LiteLLM fallback 按 OpenAI-compatible messages 投影；非 LiteLLM payload 只用可见文本降级
         formatted_messages = []
         for message in messages:
@@ -103,7 +103,7 @@ class LiteLLMAdapter(LLMProvider, TextCompletionProvider):
             api_key: Optional[str] = None,
     ) -> LLMCompletionResult:
         # 内部消息投影为 OpenAI-compatible message 格式
-        formatted_messages = self._litellm_messages_formatter(messages)
+        formatted_messages = self._litemessages_for_llm_formatter(messages)
         litellm_model = self._to_openai_compatible_model(model_name)
         try:
             response = await litellm.acompletion(
@@ -134,7 +134,7 @@ class LiteLLMAdapter(LLMProvider, TextCompletionProvider):
     ) -> AsyncGenerator[LLMStreamEvent, None]:
 
         # 内部消息投影为 OpenAI-compatible message 格式
-        formatted_msgs = self._litellm_messages_formatter(messages)
+        formatted_msgs = self._litemessages_for_llm_formatter(messages)
         litellm_model = self._to_openai_compatible_model(model_request.model_name)
 
         # 设置请求参数

@@ -2,9 +2,8 @@ from dataclasses import dataclass, field
 from typing import List, Optional
 
 from chat.application.events.base import StreamEvent
-from chat.application.tools.core import ToolInvocationGroups
+from chat.application.tools.core import ClassifiedToolInvocationPlan
 from chat.domain.entities import ChatMessage
-from chat.domain.entities.suspended_chat import SuspendedChatReason
 
 
 @dataclass(frozen=True)
@@ -14,11 +13,14 @@ class StepStartEvent(StreamEvent):
     pass
 
 
-@dataclass(frozen=True)
-class StepResumeRequirement:
-    suspend_reason: SuspendedChatReason
-    resume_context: ToolInvocationGroups
+@dataclass(frozen=False)
+class TurnSuspension:
+    classified_tool_invocation_plan: ClassifiedToolInvocationPlan
+    iteration: int
 
+    @property
+    def next_iteration(self) -> int:
+        return self.iteration + 1
 
 @dataclass(frozen=True)
 class StepFinishEvent(StreamEvent):
@@ -27,4 +29,4 @@ class StepFinishEvent(StreamEvent):
     intermediate_messages: List[ChatMessage] = field(default_factory=list)
     final_assistant_message: Optional[ChatMessage] = None
     token_usage: int = field(default_factory=int)
-    resume_requirement: Optional[StepResumeRequirement] = None
+    suspension: Optional[TurnSuspension] = None

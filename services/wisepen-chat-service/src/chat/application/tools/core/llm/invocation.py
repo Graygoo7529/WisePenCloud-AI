@@ -18,26 +18,27 @@ class ToolCallMessageAccumulator:
     tool_call_argument_str: str = ""
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=False)
 class ToolInvocation:
     tool_call_id: str
     tool_name: str
     tool_call_arguments: dict[str, Any]
     query_loop_iteration: int | None = None
+    is_approved: bool = False
     # metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
-class ToolInvocationGroups:
-    approval_required: list[ToolInvocation]
-    server: list[ToolInvocation]
-    client: list[ToolInvocation]
+class ClassifiedToolInvocationPlan:
+    approval_required_tools: list[ToolInvocation] # 需要请求-确认的工具调用
+    server_tools: list[ToolInvocation] # 服务端工具调用
+    client_tools: list[ToolInvocation] # 客户端工具调用
 
 
-def group_tool_invocations(
+def classify_tools(
     invocations: list[ToolInvocation],
     tool_scope: "ToolScope",
-) -> ToolInvocationGroups:
+) -> ClassifiedToolInvocationPlan:
     approval_required: list[ToolInvocation] = []
     server: list[ToolInvocation] = []
     client: list[ToolInvocation] = []
@@ -46,15 +47,15 @@ def group_tool_invocations(
         tool = tool_scope.get(invocation.tool_name)
         if tool is not None and tool.definition.policy.execution_target == ToolExecutionTarget.CLIENT:
             client.append(invocation)
-        elif tool is not None and tool.definition.policy.risk_level == ToolRiskLevel.HIGH:
+        elif tool is not None and tool.definition.policy.risk_level == ToolRiskLevel.HIGH: # 高危工具执行前需要请求用户确认
             approval_required.append(invocation)
         else:
             server.append(invocation)
 
-    return ToolInvocationGroups(
-        approval_required=approval_required,
-        server=server,
-        client=client,
+    return ClassifiedToolInvocationPlan(
+        approval_required_tools=approval_required,
+        server_tools=server,
+        client_tools=client,
     )
 
 

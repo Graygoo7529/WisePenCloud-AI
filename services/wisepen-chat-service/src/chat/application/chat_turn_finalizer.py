@@ -52,7 +52,7 @@ class ChatTurnFinalizer:
         memory_policy: AgentMemoryPolicy,
         model_info: ModelRequestInfo,
         token_usage: int,
-        group_id: Optional[str] = None,
+        billing_group_id: Optional[str] = None,
     ) -> None:
         """完成正式消息持久化，并在成功后执行计费。"""
         await self.persist_messages(
@@ -66,7 +66,7 @@ class ChatTurnFinalizer:
                 user_id=user_id,
                 model_info=model_info,
                 token_usage=token_usage,
-                group_id=group_id,
+                billing_group_id=billing_group_id,
             )
         except Exception as exc:
             error("chat token billing failed.", session_id=session_id, exc=exc)
@@ -76,7 +76,7 @@ class ChatTurnFinalizer:
         user_id: str,
         model_info: ModelRequestInfo,
         token_usage: int,
-        group_id: Optional[str] = None,
+        billing_group_id: Optional[str] = None,
     ) -> None:
         """
         发送 token 计费消息到 Kafka
@@ -94,11 +94,11 @@ class ChatTurnFinalizer:
         )
 
         if model_info.scope != ModelScope.SYSTEM:
-            group_id = None
+            billing_group_id = None
 
         value = {
             "userId": user_id,
-            "groupId": group_id,
+            "groupId": billing_group_id,
             "usageTokens": token_usage,
             "billingRatio": model_info.billing_ratio,
             "traceId": uuid.uuid4().hex,

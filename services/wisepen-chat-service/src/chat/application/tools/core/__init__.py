@@ -18,8 +18,8 @@ from chat.application.tools.core.registry import (
 from chat.application.tools.core.llm.invocation import (
     ToolCallMessageAccumulator,
     ToolInvocation,
-    ToolInvocationGroups,
-    group_tool_invocations,
+    ClassifiedToolInvocationPlan,
+    classify_tools,
     tool_call_parse,
 )
 
@@ -73,8 +73,8 @@ __all__ = [
     # invocation
     "ToolCallMessageAccumulator",
     "ToolInvocation",
-    "ToolInvocationGroups",
-    "group_tool_invocations",
+    "ClassifiedToolInvocationPlan",
+    "classify_tools",
     "tool_call_parse",
 
     # renderer

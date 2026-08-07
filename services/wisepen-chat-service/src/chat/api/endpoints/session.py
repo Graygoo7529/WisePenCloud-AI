@@ -7,10 +7,9 @@ from chat.api.schemas.session import (
 )
 from chat.api.converters import convert_to_ui_messages
 from chat.application.agents import AgentResolver
-from chat.application.suspended_chat_service import SuspendedChatService
 from chat.domain.entities import ChatSession
 from chat.domain.error_codes import ChatErrorCode
-from chat.domain.repositories import SessionRepository, MessageRepository
+from chat.domain.repositories import SessionRepository, MessageRepository, SuspendedChatRepository
 from chat.container import Container
 
 from common.security import require_login
@@ -147,21 +146,25 @@ async def get_session_messages(
         user_id: str = Depends(require_login),
         session_repo: SessionRepository = Depends(Provide[Container.session_repo]),
         message_repo: MessageRepository = Depends(Provide[Container.message_repo]),
-        suspended_chat_service: SuspendedChatService = Depends(Provide[Container.suspended_chat_service]),
+        suspended_chat_repo: SuspendedChatRepository = Depends(Provide[Container.suspended_chat_repo])
 ):
     await session_repo.get_session_for_user(session_id, user_id)
 
     page_messages, total_turns = await message_repo.list_session_message_turns_page(session_id, page=page, size=size)
     messages_for_ui = list(page_messages)
-    pending_tool_states = None
-    
+
     # 仅在最新回合展示待处理SuspendedChat内容
+    tool_states = {}
     if page == 1:
-        pending_display = await suspended_chat_service.get_pending_turn_for_display(user_id, session_id)
-        if pending_display is not None:
-            pending_messages, pending_tool_states = pending_display
-            messages_for_ui.extend(pending_messages)
-    ui_messages = convert_to_ui_messages(messages_for_ui, pending_tool_states=pending_tool_states)
+        pending = await suspended_chat_repo.find_suspended_by_session(session_id, user_id)
+        pending_messages = list(pending.context.chat_record_messages)
+        for item in pending.context.turn_suspension.classified_tool_invocation_plan.approval_required_tools:
+            tool_states[item.tool_call_id] = "approval-requested"
+        for item in pending.context.turn_suspension.classified_tool_invocation_plan.client_tools:
+            tool_states[item.tool_call_id] = "input-available"
+        messages_for_ui.extend(pending_messages)
+
+    ui_messages = convert_to_ui_messages(messages_for_ui, tool_states=tool_states)
 
     return R.success(data=PageResult.of(
         items=ui_messages,

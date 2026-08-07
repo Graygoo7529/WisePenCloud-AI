@@ -8,18 +8,17 @@ from chat.application.tools.core.definition import (
     ToolParametersSchema,
     ToolPolicy,
 )
-from chat.application.tools.core.execution.result import ToolExecutionError
 
 
 @dataclass(frozen=True)
-class PageClientToolCapability:
+class ClientToolCapability:
     name: str
     description: str
     input_schema: dict[str, Any]
 
 
 class _ClientTool:
-    def __init__(self, capability: PageClientToolCapability) -> None:
+    def __init__(self, capability: ClientToolCapability) -> None:
         self.capability = capability
         self._definition = ToolDefinition(
             llm_spec=ToolLLMSpec(
@@ -37,5 +36,5 @@ class _ClientTool:
     def definition(self) -> ToolDefinition:
         return self._definition
 
-def client_tool_from_capability(capability: PageClientToolCapability) -> _ClientTool:
+def client_tool_from_capability(capability: ClientToolCapability) -> _ClientTool:
     return _ClientTool(capability)

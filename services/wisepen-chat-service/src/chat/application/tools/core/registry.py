@@ -4,7 +4,7 @@ from typing import TYPE_CHECKING, Any
 
 from chat.application.tools.core.definition import Tool
 from chat.application.tools.core.llm.renderer import schema_renderer
-from chat.application.tools.client_tools import PageClientToolCapability, client_tool_from_capability
+from chat.application.tools.client_tools import ClientToolCapability, client_tool_from_capability
 from chat.domain.error_codes import ChatErrorCode
 from chat.domain.repositories import ToolConfigRepository
 from common.core.exceptions import ServiceException
@@ -22,16 +22,16 @@ class ToolScope:
         tools: dict[str, Tool],
         context: dict[str, Any] | None,
         configs: dict[str, dict[str, Any]] | None = None,
-        page_client_tool_capabilities: list[PageClientToolCapability] | None = None,
+        client_tool_capabilities: list[ClientToolCapability] | None = None,
     ) -> None:
         self._tools = dict(tools)
         self._context = dict(context or {})
         self._configs = { name: dict(config) for name, config in (configs or {}).items() if name in self._tools}
         self._schemas: list[dict[str, Any]] = [schema_renderer(tool.definition.llm_spec) for tool in self._tools.values()]
-        self._page_client_tool_capabilities = [
-            capability
-            for capability in (page_client_tool_capabilities or [])
-            if capability.name in self._tools
+        self._client_tool_capabilities = [
+            client_tool_capability
+            for client_tool_capability in (client_tool_capabilities or [])
+            if client_tool_capability.name in self._tools
         ]
 
     def schemas(self) -> list[dict[str, Any]]:
@@ -51,12 +51,12 @@ class ToolScope:
     def __len__(self) -> int:
         return len(self._tools)
 
-    def to_resume_data(self) -> dict[str, Any]:
+    def to_suspension_data(self) -> dict[str, Any]:
         return {
             "tool_names": list(self._tools),
             "context": dict(self._context),
             "configs": {name: dict(config) for name, config in self._configs.items()},
-            "page_client_tool_capabilities": list(self._page_client_tool_capabilities),
+            "client_tool_capabilities": list(self._client_tool_capabilities),
         }
 
 class ToolRegistry:
@@ -99,6 +99,7 @@ class ToolRegistry:
                 system_tools[name] = tool
         return system_tools
 
+    # 推导当前工具
     async def derive(
         self,
         *,
@@ -106,23 +107,27 @@ class ToolRegistry:
         expose_tool_name_set: set[str] | None = None,
         allow_tool_name_set: set[str] | None = None,
         deny_tool_name_set: set[str] | None = None,
-        page_client_tool_capabilities: list[PageClientToolCapability] | None = None,
+        client_tool_capabilities: list[ClientToolCapability] | None = None,
         user_id: str,
     ) -> ToolScope:
         context = dict(tool_context or {})
         expose_tool_name_set = expose_tool_name_set or set()
         deny_tool_name_set = deny_tool_name_set or set()
 
-        tools = await self.system_tools()
+        tools: dict[str, Tool] = await self.system_tools()
 
         # 收集用户配置的 MCP 工具
         if self._mcp_tool_catalog is not None:
-            user_tools = await self._mcp_tool_catalog.load_user_mcp_tools(user_id)
-            for name, tool in user_tools.items():
-                if name not in tools:
-                    tools[name] = tool
+            for name, tool in (await self._mcp_tool_catalog.load_user_mcp_tools(user_id)).items():
+                tools.setdefault(name, tool) # 用户 MCP 工具不覆盖已有工具
 
-        self._merge_client_tools(tools, page_client_tool_capabilities or [])
+        # 构建前端工具
+        for client_tool_capability in client_tool_capabilities:
+            if client_tool_capability.name in tools:
+                raise ServiceException(
+                    ChatErrorCode.TOOL_CONFIG_INVALID, custom_msg=f"客户端工具名称冲突: {client_tool_capability.name}",
+                )
+            tools[client_tool_capability.name] = client_tool_from_capability(client_tool_capability)
 
         filtered_tools: dict[str, Tool] = {}
         # 处理工具配置
@@ -157,19 +162,29 @@ class ToolRegistry:
             tools=filtered_tools,
             context=context,
             configs=tool_configs,
-            page_client_tool_capabilities=page_client_tool_capabilities,
+            client_tool_capabilities=client_tool_capabilities,
         )
 
-    async def restore_scope(self, resume_data: dict[str, Any], user_id: str) -> ToolScope:
-        tool_names = list(resume_data.get("tool_names") or [])
-        page_capabilities = list(resume_data.get("page_client_tool_capabilities") or [])
+    # 恢复当前工具推导（从暂停的任务缓存中）
+    async def recover_derived(self, staging_data: dict[str, Any], user_id: str) -> ToolScope:
+        tool_names = list(staging_data.get("tool_names") or [])
+        client_tool_capabilities = list(staging_data.get("client_tool_capabilities") or [])
         tools = await self.system_tools()
 
+        # 收集用户配置的 MCP 工具
         if self._mcp_tool_catalog is not None:
             for name, tool in (await self._mcp_tool_catalog.load_user_mcp_tools(user_id)).items():
-                tools.setdefault(name, tool)
+                tools.setdefault(name, tool) # 用户 MCP 工具不覆盖已有工具
 
-        self._merge_client_tools(tools, page_capabilities)
+        # 构建前端工具
+        for client_tool_capability in client_tool_capabilities:
+            if client_tool_capability.name in tools:
+                raise ServiceException(
+                    ChatErrorCode.TOOL_CONFIG_INVALID, custom_msg=f"客户端工具名称冲突: {client_tool_capability.name}",
+                )
+            tools[client_tool_capability.name] = client_tool_from_capability(client_tool_capability)
+
+        # 如果有此前存在的 Tool 现在未找到，则报错
         missing_names = [name for name in tool_names if name not in tools]
         if missing_names:
             raise ServiceException(
@@ -178,11 +193,12 @@ class ToolRegistry:
             )
 
         selected_tools = {name: tools[name] for name in tool_names}
+
         return ToolScope(
             tools=selected_tools,
-            context=dict(resume_data.get("context") or {}),
-            configs=dict(resume_data.get("configs") or {}),
-            page_client_tool_capabilities=page_capabilities,
+            context=dict(staging_data.get("context") or {}),
+            configs=dict(staging_data.get("configs") or {}),
+            client_tool_capabilities=client_tool_capabilities,
         )
 
     def __len__(self) -> int:
@@ -225,18 +241,3 @@ class ToolRegistry:
             }
 
         return configured_tool_names, tool_configs
-
-    @staticmethod
-    def _merge_client_tools(
-        tools: dict[str, Tool],
-        capabilities: list[PageClientToolCapability],
-    ) -> None:
-        seen: set[str] = set()
-        for capability in capabilities:
-            if capability.name in seen or capability.name in tools:
-                raise ServiceException(
-                    ChatErrorCode.TOOL_CONFIG_INVALID,
-                    custom_msg=f"客户端工具名称冲突: {capability.name}",
-                )
-            seen.add(capability.name)
-            tools[capability.name] = client_tool_from_capability(capability)

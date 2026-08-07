@@ -2,9 +2,25 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any, Protocol, Dict, Callable, TYPE_CHECKING
 
+from chat.application.events import StreamEvent
+from chat.application.tools.core.llm.invocation import ToolInvocation
+from chat.domain.entities import ChatMessage
+
 if TYPE_CHECKING:
     from chat.application.tools.core.execution.hooks.base import ToolPreflightHook
 
+
+@dataclass(frozen=True)
+class ClientToolResult:
+    tool_call_id: str
+    is_error: bool
+    output: Any | None = None
+
+
+@dataclass(frozen=True)
+class ToolApprovalStatus:
+    tool_call_id: str
+    approved: bool
 
 class ToolTimeoutStrategy(StrEnum):
     CANCEL_TASK = "cancel_task"

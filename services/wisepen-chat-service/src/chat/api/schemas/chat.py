@@ -1,19 +1,50 @@
 from typing import Optional, List, Dict, Any, Set, Self
 from pydantic import BaseModel, Field, model_validator
 
+from chat.application.tools.client_tools import ClientToolCapability
 
-class ClientToolCapability(BaseModel):
-    name: str = Field(..., min_length=1, description="客户端工具名称；不能为空。")
-    description: str = Field(..., min_length=1, description="客户端工具说明；不能为空。")
-    input_schema: Dict[str, Any] = Field(..., description="客户端工具输入 JSON Schema，根类型必须为 object。")
+
+class ClientToolResultSubmission(BaseModel):
+    tool_call_id: str = Field(..., min_length=1, description="客户端工具调用 ID。")
+    output: Any | None = Field(default=None, description="客户端工具成功执行结果。")
+    error_text: Optional[str] = Field(default=None, min_length=1, description="客户端工具执行失败原因。")
 
     @model_validator(mode="after")
-    def validate_input_schema(self) -> Self:
-        from chat.application.tools.core import ToolParametersSchema
-
-        ToolParametersSchema(self.input_schema)
+    def validate_output_or_error(self) -> Self:
+        has_output = "output" in self.model_fields_set
+        has_error = "error_text" in self.model_fields_set and self.error_text is not None
+        if has_output == has_error:
+            raise ValueError("output 和 error_text 必须且只能提供一个")
         return self
 
+
+class ToolApprovalStatusSubmission(BaseModel):
+    tool_call_id: str = Field(..., min_length=1, description="待审批工具调用 ID。")
+    approved: bool = Field(..., description="是否批准执行该高危工具。")
+
+
+class ChatRecoverRequest(BaseModel):
+    session_id: str = Field(..., min_length=1, description="目标会话 ID；必须属于当前登录用户。")
+    client_tool_results: List[ClientToolResultSubmission] = Field(
+        default_factory=list,
+        description="客户端工具执行结果列表；没有客户端工具结果时可为空数组。",
+    )
+    tool_approval_status: List[ToolApprovalStatusSubmission] = Field(
+        default_factory=list,
+        description="高危工具审批状态列表；没有待审批工具时可为空数组。",
+    )
+
+    @model_validator(mode="after")
+    def validate_payload(self) -> Self:
+        result_ids = [item.tool_call_id for item in self.client_tool_results]
+        approval_ids = [item.tool_call_id for item in self.tool_approval_status]
+
+        if len(result_ids) != len(set(result_ids)):
+            raise ValueError("client_tool_results.tool_call_id 不允许重复")
+        if len(approval_ids) != len(set(approval_ids)):
+            raise ValueError("tool_approval_status.tool_call_id 不允许重复")
+
+        return self
 
 class ChatRequest(BaseModel):
     """
@@ -57,50 +88,7 @@ class ChatRequest(BaseModel):
         default=None,
         description="预留字段；当前入口接收并透传，但现有 coordinator 尚未消费该字段，不应依赖其强制启用 Skill。",
     )
-    page_client_tool_capabilities: List[ClientToolCapability] = Field(
+    client_tool_capabilities: List[ClientToolCapability] = Field(
         default_factory=list,
         description="当前页面支持执行的客户端工具能力；只在本轮及其恢复链路中有效。",
     )
-
-
-class ClientToolResultSubmission(BaseModel):
-    tool_call_id: str = Field(..., min_length=1, description="客户端工具调用 ID。")
-    output: Any | None = Field(default=None, description="客户端工具成功执行结果。")
-    error_text: Optional[str] = Field(default=None, min_length=1, description="客户端工具执行失败原因。")
-
-    @model_validator(mode="after")
-    def validate_output_or_error(self) -> Self:
-        has_output = "output" in self.model_fields_set
-        has_error = "error_text" in self.model_fields_set and self.error_text is not None
-        if has_output == has_error:
-            raise ValueError("output 和 error_text 必须且只能提供一个")
-        return self
-
-
-class ChatResumeRequest(BaseModel):
-    session_id: str = Field(..., min_length=1, description="目标会话 ID；必须属于当前登录用户。")
-    tool_results: List[ClientToolResultSubmission] = Field(..., min_length=1, description="客户端工具执行结果。")
-
-    @model_validator(mode="after")
-    def validate_unique_tool_call_ids(self) -> Self:
-        ids = [item.tool_call_id for item in self.tool_results]
-        if len(ids) != len(set(ids)):
-            raise ValueError("tool_call_id 不允许重复")
-        return self
-
-
-class ToolApprovalDecisionSubmission(BaseModel):
-    tool_call_id: str = Field(..., min_length=1, description="待审批工具调用 ID。")
-    approved: bool = Field(..., description="是否批准执行该高危工具。")
-
-
-class ChatApprovalRequest(BaseModel):
-    session_id: str = Field(..., min_length=1, description="目标会话 ID；必须属于当前登录用户。")
-    decisions: List[ToolApprovalDecisionSubmission] = Field(..., min_length=1, description="高危工具审批结果。")
-
-    @model_validator(mode="after")
-    def validate_unique_tool_call_ids(self) -> Self:
-        ids = [item.tool_call_id for item in self.decisions]
-        if len(ids) != len(set(ids)):
-            raise ValueError("tool_call_id 不允许重复")
-        return self
