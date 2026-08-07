@@ -1,7 +1,7 @@
+from beanie import PydanticObjectId
+
 from chat.domain.entities import SuspendedChat
-from chat.domain.error_codes import ChatErrorCode
 from chat.domain.repositories import SuspendedChatRepository
-from common.core.exceptions import ServiceException
 
 
 class MongoSuspendedChatRepository(SuspendedChatRepository):
@@ -19,6 +19,11 @@ class MongoSuspendedChatRepository(SuspendedChatRepository):
         ).sort("-updated_at").first_or_none()
 
         return suspended_chat
+
+    async def delete_by_id(self, suspended_chat_id: str) -> None:
+        await SuspendedChat.get_pymongo_collection().delete_one({
+            "_id": PydanticObjectId(suspended_chat_id),
+        })
 
     async def delete_suspended_by_session(self, session_id: str, user_id: str) -> None:
         suspended_chat = await SuspendedChat.find(

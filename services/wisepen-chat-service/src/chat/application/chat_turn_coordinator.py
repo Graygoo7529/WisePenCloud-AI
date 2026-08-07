@@ -110,6 +110,7 @@ class ChatTurnCoordinator:
         suspended_chat: SuspendedChat | None = await self._suspended_chat_repo.find_suspended_by_session(session_id, user_id)
         if suspended_chat is None:
             raise ServiceException(ChatErrorCode.SUSPENDED_CHAT_NOT_FOUND)
+        suspended_chat_id = str(suspended_chat.id)
         tool_scope = await self._tool_registry.recover_derived(suspended_chat.context.tool_scope_data, user_id)
 
         chat_turn_context = ChatTurnContext(
@@ -129,7 +130,7 @@ class ChatTurnCoordinator:
             yield event
         self.set_background_task(background_tasks, chat_turn_context)
 
-        await self._suspended_chat_repo.delete_suspended_by_session(session_id, user_id)
+        await self._suspended_chat_repo.delete_by_id(suspended_chat_id)
 
     # -------------------------------------------------------------------------
     # 公共入口
@@ -407,6 +408,7 @@ class ChatTurnCoordinator:
         unfinished_chat: SuspendedChat | None = await self._suspended_chat_repo.find_suspended_by_session(session_id, user_id)
         if unfinished_chat is None:
             raise ServiceException(ChatErrorCode.SUSPENDED_CHAT_NOT_FOUND)
+        unfinished_chat_id = str(unfinished_chat.id)
 
         pending_messages = []
         pending_messages.extend(
@@ -461,4 +463,4 @@ class ChatTurnCoordinator:
                 memory_policy=unfinished_chat.context.agent_spec.memory_policy,
             )
 
-        await self._suspended_chat_repo.delete_suspended_by_session(session_id, user_id)
+        await self._suspended_chat_repo.delete_by_id(unfinished_chat_id)
