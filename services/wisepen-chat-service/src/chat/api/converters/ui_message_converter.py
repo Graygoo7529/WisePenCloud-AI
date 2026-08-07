@@ -8,7 +8,10 @@ from typing import Any, Dict, List, Optional
 from chat.domain.entities import ChatMessage, Role
 
 
-def convert_to_ui_messages(messages: List[ChatMessage]) -> List[Dict[str, Any]]:
+def convert_to_ui_messages(
+    messages: List[ChatMessage],
+    tool_states: dict[str, str] | None = None,
+) -> List[Dict[str, Any]]:
     """
     将按 created_at 排序的 ChatMessage[] 分组并转换为 UIMessage[]。
 
@@ -19,7 +22,8 @@ def convert_to_ui_messages(messages: List[ChatMessage]) -> List[Dict[str, Any]]:
     """
     if not messages:
         return []
-
+    
+    tool_states = tool_states or {}
     groups: List[List[ChatMessage]] = []
     current_group: List[ChatMessage] = []
 
@@ -41,7 +45,7 @@ def convert_to_ui_messages(messages: List[ChatMessage]) -> List[Dict[str, Any]]:
         if first.role == Role.USER:
             result.append(_build_user_ui_message(first))
         else:
-            ui_msg = _build_assistant_ui_message(group)
+            ui_msg = _build_assistant_ui_message(group, tool_states)
             if ui_msg:
                 result.append(ui_msg)
 
@@ -60,7 +64,10 @@ def _build_user_ui_message(msg: ChatMessage) -> Dict[str, Any]:
     }
 
 
-def _build_assistant_ui_message(group: List[ChatMessage]) -> Optional[Dict[str, Any]]:
+def _build_assistant_ui_message(
+    group: List[ChatMessage],
+    tool_states: dict[str, str],
+) -> Optional[Dict[str, Any]]:
     """
     将一组连续的 assistant + tool 消息合并为单个 assistant UIMessage。
 
@@ -101,12 +108,12 @@ def _build_assistant_ui_message(group: List[ChatMessage]) -> Optional[Dict[str, 
                         parsed_input = {}
 
                     tool_output = tool_results.get(tc.call_id, "")
-
+                    tool_state = tool_states.get(tc.call_id, "output-available")
                     parts.append({
                         "type": f"tool-{tc.name}",
                         "toolCallId": tc.call_id,
-                        "state": "output-available",
                         "input": parsed_input,
+                        "state": tool_state,
                         "output": tool_output,
                     })
 

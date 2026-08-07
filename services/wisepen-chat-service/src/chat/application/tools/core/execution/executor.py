@@ -2,6 +2,8 @@ import asyncio
 from datetime import datetime, timezone
 from typing import Any
 
+from chat.application.tools.core.definition import ClientToolResult
+from chat.application.tools.core import ToolRiskLevel
 from chat.application.tools.core.execution.hooks.builtin import JsonSchemaCheck, RequiredContextCheck
 from chat.application.tools.core.execution.result import ToolExecutionError, ToolExecutionResult
 
@@ -13,6 +15,39 @@ class ToolExecutor:
     def __init__(self, tool_scope: ToolScope) -> None:
         self._tool_scope = tool_scope
 
+    async def execute_client_one(self, invocation: ToolInvocation, client_tool_result: ClientToolResult) -> ToolExecutionResult:
+        started_at = datetime.now(timezone.utc)
+        tool = self._tool_scope.get(invocation.tool_name)
+
+        try:
+            if tool is None:
+                raise ToolExecutionError(
+                    reason="Tool Unavailable",
+                    detail_reason=f"Tool '{invocation.tool_name}' is not available in this scope.",
+                    retryable=False,
+                )
+            if client_tool_result is None:
+                raise ToolExecutionError(
+                    reason="Tool Execution Timeout",
+                    detail_reason=f"Tool '{invocation.tool_name}' timed out.",
+                    retryable=False,
+                )
+            if client_tool_result.is_error:
+                raise ToolExecutionError(
+                    reason="Tool Execution Failed",
+                    detail_reason=client_tool_result.output,
+                    retryable=False,
+                )
+            return ToolExecutionResult(tool_invocation=invocation, tool_output=client_tool_result.output,
+                                       started_at=started_at, finished_at=datetime.now(timezone.utc),
+                                       tool_execution_error=None)
+
+        except ToolExecutionError as tool_execution_error:
+            return ToolExecutionResult(tool_invocation=invocation, tool_output=None,
+                                       started_at=started_at, finished_at=datetime.now(timezone.utc),
+                                       tool_execution_error=tool_execution_error)
+
+
     async def execute_one(self, invocation: ToolInvocation) -> ToolExecutionResult:
         started_at = datetime.now(timezone.utc)
         tool = self._tool_scope.get(invocation.tool_name)
@@ -22,6 +57,14 @@ class ToolExecutor:
                 raise ToolExecutionError(
                     reason="Tool Unavailable",
                     detail_reason=f"Tool '{invocation.tool_name}' is not available in this scope.",
+                    retryable=False,
+                )
+
+            # 高危工具用户没有批准执行
+            if tool.definition.policy is not None and tool.definition.policy.risk_level == ToolRiskLevel.HIGH and invocation.is_approved is False:
+                raise ToolExecutionError(
+                    reason="Tool Execution Denied",
+                    detail_reason=f"Tool '{invocation.tool_name}' was not approved by the user.",
                     retryable=False,
                 )
 

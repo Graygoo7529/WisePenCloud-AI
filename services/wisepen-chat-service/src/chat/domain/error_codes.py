@@ -7,6 +7,9 @@ class ChatErrorCode(IErrorCode):
     CONTEXT_LIMIT_EXCEEDED = (40002, "对话上下文超出模型限制")
     AGENT_NOT_FOUND = (40003, "Agent 不存在或未发布")
     SESSION_AGENT_CHANGE_FORBIDDEN = (40004, "已有消息的会话不能切换 Agent")
+    CHAT_REQUEST_INVALID = (40005, "completions 请求参数不合法")
+    CHAT_TURN_IN_PROGRESS = (40006, "当前会话已有正在运行的对话")
+    CHAT_ACTIVE_TURN_NOT_FOUND = (40007, "当前会话没有正在运行的对话")
 
     # --- Provider 相关 ---
     PROVIDER_NOT_FOUND = (40011, "供应商不存在")
@@ -29,6 +32,8 @@ class ChatErrorCode(IErrorCode):
     MCP_TOOL_CONFIG_NOT_FOUND = (40033, "MCP 工具配置不存在")
     MCP_TOOL_SERVER_URL_INVALID = (40034, "MCP 工具服务器不合法")
     MCP_TOOL_SERVER_UNREACHABLE = (40035, "MCP 工具服务器不可用")
+    SUSPENDED_CHAT_NOT_FOUND = (40036, "SuspendedChat 不存在")
+    SUSPENDED_CHAT_STATE_INVALID = (40037, "SuspendedChat 状态不合法")
 
     # --- 语音相关 ---
     SPEECH_PROVIDER_NOT_CONFIGURED = (40041, "语音识别 Provider 未配置")
@@ -36,6 +41,8 @@ class ChatErrorCode(IErrorCode):
 
     # --- 模型相关 ---
     LLM_GENERATION_FAILED = (50011, "大模型生成失败")
+    CHAT_TURN_LOCK_FAILED = (50012, "Session 处理锁获取失败")
+    CHAT_MESSAGE_PERSIST_FAILED = (50013, "聊天消息持久化失败")
 
     # --- 记忆相关 ---
     MEMORY_NOT_FOUND = (40001, "目标记忆不存在")

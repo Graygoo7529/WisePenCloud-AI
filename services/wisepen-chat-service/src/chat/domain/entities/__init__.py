@@ -8,6 +8,7 @@ from .resource import ResourceItemInfo, ResourcePermission
 from .skill import Skill, SkillMeta, SkillAssetMeta
 from .tool_config import UserToolConfig
 from .mcp_tool_server_config import McpToolSnapshot, McpToolStatus, UserMcpServerConfig
+from .suspended_chat import SuspendedChat
 
 __all__ = [
     "ChatMessage", "MessageModelInfo", "Role", "ToolCallMessage",
@@ -18,4 +19,5 @@ __all__ = [
     "ResourceItemInfo", "ResourcePermission",
     "Skill", "SkillMeta", "SkillAssetMeta",
     "UserToolConfig", "McpToolSnapshot", "McpToolStatus", "UserMcpServerConfig",
+    "SuspendedChat"
 ]

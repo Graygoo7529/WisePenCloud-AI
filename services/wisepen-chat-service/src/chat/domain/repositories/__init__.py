@@ -1,5 +1,6 @@
 from .session_repo import SessionRepository
 from .message_repo import MessageRepository
+from .suspended_chat_repo import SuspendedChatRepository
 from .hot_context_repo import HotContextRepository
 from .model_repo import ModelRepository
 from .provider_repo import ProviderRepository
@@ -10,6 +11,7 @@ from .mcp_tool_discovery_cache_repo import McpToolDiscoveryCacheRepository
 __all__ = [
     "SessionRepository",
     "MessageRepository",
+    "SuspendedChatRepository",
     "HotContextRepository",
     "ModelRepository",
     "ProviderRepository",

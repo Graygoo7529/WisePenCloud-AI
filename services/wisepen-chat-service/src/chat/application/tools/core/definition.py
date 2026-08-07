@@ -2,9 +2,25 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any, Protocol, Dict, Callable, TYPE_CHECKING
 
+from chat.application.events import StreamEvent
+from chat.application.tools.core.llm.invocation import ToolInvocation
+from chat.domain.entities import ChatMessage
+
 if TYPE_CHECKING:
     from chat.application.tools.core.execution.hooks.base import ToolPreflightHook
 
+
+@dataclass(frozen=True)
+class ClientToolResult:
+    tool_call_id: str
+    is_error: bool
+    output: Any | None = None
+
+
+@dataclass(frozen=True)
+class ToolApprovalStatus:
+    tool_call_id: str
+    approved: bool
 
 class ToolTimeoutStrategy(StrEnum):
     CANCEL_TASK = "cancel_task"
@@ -15,6 +31,11 @@ class ToolRiskLevel(StrEnum):
     LOW = "low"
     MEDIUM = "medium"
     HIGH = "high"
+
+
+class ToolExecutionTarget(StrEnum):
+    SERVER = "server"
+    CLIENT = "client"
 
 @dataclass(frozen=True)
 class ToolParametersSchema:
@@ -120,6 +141,7 @@ class ToolPolicy:
     persisted_output_placeholder_factory: Callable[[dict, Any], str | None] = lambda tool_call_arguments, output: None # 持久化输出的占位生成器
 
     risk_level: ToolRiskLevel = ToolRiskLevel.LOW # 风险级别
+    execution_target: ToolExecutionTarget = ToolExecutionTarget.SERVER # 工具执行端
 
     required_context_keys: tuple[str, ...] = () # 需要的上下文 Key
     required_allowed_builtin_skill_ids: tuple[str, ...] = () # 需要的内置 Skill

@@ -75,6 +75,25 @@ def tool_input_available(tool_call_id: str, tool_name: str, input: Dict) -> str:
 def tool_output_available(tool_call_id: str, output: Union[Dict, str]) -> str:
     return _sse({"type": "tool-output-available", "toolCallId": tool_call_id, "output": output})
 
+# 自定义事件 data-tool-execution-error
+def tool_error(tool_call_id: str, error_text: str) -> str:
+    return _sse({"type": "data-tool-execution-error", "toolCallId": tool_call_id, "errorText": error_text})
+
+# 自定义事件 data-tool-execution-denied
+def tool_denied(tool_call_id: str) -> str:
+    return _sse({"type": "data-tool-execution-denied", "toolCallId": tool_call_id})
+
+# 自定义事件 data-tool-approval-request
+def tool_approval_request(approval_id: str, tool_call_id: str, tool_name: str, tool_desc: str, input: Dict) -> str:
+    return _sse({
+        "type": "data-tool-approval-request",
+        "approvalId": approval_id,
+        "toolCallId": tool_call_id,
+        "toolName": tool_name,
+        "toolDesc": tool_desc,
+        "input": input,
+    })
+
 
 # =============================================================================
 # 步骤

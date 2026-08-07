@@ -4,12 +4,15 @@ from chat.application.events.reasoning import (
     ReasoningEndEvent,
     ReasoningStartEvent,
 )
-from chat.application.events.step import StepFinishEvent, StepStartEvent
+from chat.application.events.step import StepFinishEvent, TurnSuspension, StepStartEvent
 from chat.application.events.text import TextDeltaEvent, TextEndEvent, TextStartEvent
 from chat.application.events.tool import (
     ToolInputAvailableEvent,
     ToolInputStartEvent,
     ToolOutputAvailableEvent,
+    ToolDeniedEvent,
+    ToolErrorEvent,
+    ToolApprovalRequiredEvent,
 )
 
 __all__ = [
@@ -17,6 +20,7 @@ __all__ = [
     "ErrorEvent",
     "StepStartEvent",
     "StepFinishEvent",
+    "TurnSuspension",
     "TextStartEvent",
     "TextDeltaEvent",
     "TextEndEvent",
@@ -26,4 +30,5 @@ __all__ = [
     "ToolInputStartEvent",
     "ToolInputAvailableEvent",
     "ToolOutputAvailableEvent",
+    "ToolApprovalRequiredEvent",
 ]

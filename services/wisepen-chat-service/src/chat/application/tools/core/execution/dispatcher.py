@@ -1,5 +1,6 @@
 import asyncio
 
+from chat.application.tools.core.definition import ClientToolResult
 from chat.application.tools.core.execution.executor import ToolExecutor
 from chat.application.tools.core.execution.result import ToolBatchResult
 from chat.application.tools.core.llm.invocation import ToolInvocation
@@ -15,6 +16,31 @@ class ToolDispatcher:
         executor = ToolExecutor(tool_scope)
         results = await asyncio.gather(
             *[executor.execute_one(invocation) for invocation in invocations],
+            return_exceptions=False,
+        )
+        return ToolBatchResult(results=list(results))
+
+    async def client_dispatch(
+        self,
+        invocations: list[ToolInvocation],
+        client_tool_results: list[ClientToolResult],
+        tool_scope: ToolScope,
+    ) -> ToolBatchResult:
+        executor = ToolExecutor(tool_scope)
+
+        result_map = {
+            result.tool_call_id: result
+            for result in client_tool_results
+        }
+
+        results = await asyncio.gather(
+            *[
+                executor.execute_client_one(
+                    invocation,
+                    result_map.get(invocation.tool_call_id),
+                )
+                for invocation in invocations
+            ],
             return_exceptions=False,
         )
         return ToolBatchResult(results=list(results))
