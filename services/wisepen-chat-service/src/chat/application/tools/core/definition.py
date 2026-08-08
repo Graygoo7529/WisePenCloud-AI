@@ -3,7 +3,6 @@ from enum import StrEnum
 from typing import Any, Protocol, Dict, Callable, TYPE_CHECKING
 
 from chat.application.events import StreamEvent
-from chat.application.tools.core.llm.invocation import ToolInvocation
 from chat.domain.entities import ChatMessage
 
 if TYPE_CHECKING:
