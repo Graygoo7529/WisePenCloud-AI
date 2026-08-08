@@ -3,9 +3,10 @@ from enum import StrEnum
 from typing import Any, Protocol, Dict, Callable, TYPE_CHECKING
 
 from chat.application.events import StreamEvent
-from chat.application.tools.core.llm.invocation import ToolInvocation
 from chat.domain.entities import ChatMessage
 
+# definition 是 invocation 的下层依赖，且本模块不使用 ToolInvocation；反向导入会让
+# invocation 在这些枚举尚未定义完成时回读 definition，从而触发循环导入。
 if TYPE_CHECKING:
     from chat.application.tools.core.execution.hooks.base import ToolPreflightHook
 
