@@ -90,6 +90,8 @@ class AppSettings(BaseModel):
     VISION_MAX_IMAGE_COUNT: int = 10
     VISION_MAX_IMAGE_BYTES: int = 5 * 1024 * 1024
     VISION_MAX_TOTAL_IMAGE_BYTES: int = 12 * 1024 * 1024
+    VISION_ENABLE_HISTORY_IMAGE_AUTO_LOAD: bool = True
+    VISION_HISTORY_IMAGE_TURN_LIMIT: int = 5
 
     # Agentic ReAct 循环
     # ReAct 最大推理迭代次数，防止工具调用产生无限循环

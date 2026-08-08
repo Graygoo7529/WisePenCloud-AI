@@ -7,7 +7,15 @@ from common.core.exceptions import ServiceException
 from common.logger import error, warn
 
 from chat.core.config.app_settings import settings
-from chat.domain.entities import ChatMessage, InlineImage, Role, ChatSession, TemporaryAttachmentRef, ResourceAttachmentRef
+from chat.domain.entities import (
+    ChatMessage,
+    VisionImage,
+    MessageAttachmentRef,
+    Role,
+    ChatSession,
+    TemporaryAttachmentRef,
+    ResourceAttachmentRef,
+)
 from chat.domain.error_codes import ChatErrorCode
 from chat.domain.entities.skill import SkillMeta
 from chat.core.providers import OssFileLoader
@@ -20,6 +28,8 @@ _IMAGE_MEDIA_TYPES = {
     "png": "image/png",
     "webp": "image/webp",
 }
+
+_IMAGE_PLACEHOLDER_TEMPLATE = "[Image attachment: {name}, attachment_id={attachment_id}]"
 
 
 @dataclass
@@ -116,11 +126,56 @@ class ChatContextAssembler:
 
         return windowed_messages
 
-    async def _resolve_query_images(
+    def build_message_attachment_refs(
         self,
         temp_attachments: List[TemporaryAttachmentRef],
-        support_vision: bool,
-    ) -> List[InlineImage]:
+        resource_attachments: List[ResourceAttachmentRef],
+        user_defined_attachment_ids: Optional[List[str]],
+    ) -> List[MessageAttachmentRef]:
+        """
+        构建当前对话的附件摘要
+        """
+
+        # 当前对话没有附件（上传或提及的）
+        if not user_defined_attachment_ids: return []
+
+        refs: List[MessageAttachmentRef] = []
+
+        # 遍历 temp_attachments
+        for ref in temp_attachments:
+            if ref.attachment_id not in set(user_defined_attachment_ids):
+                continue # 跳过不是当前对话上传或提及的
+            refs.append(MessageAttachmentRef(
+                attachment_id=ref.attachment_id,
+                kind="temporary",
+                name=ref.attachment_name,
+                extension=ref.extension.lower(),
+                file_size=ref.file_size,
+                mime_type=ref.mime_type,
+                is_image=ref.extension.lower() in _IMAGE_MEDIA_TYPES,
+            ))
+
+        # 遍历 resource_attachments
+        for ref in resource_attachments:
+            if ref.attachment_id not in set(user_defined_attachment_ids):
+                continue # 跳过不是当前对话上传或提及的
+            refs.append(MessageAttachmentRef(
+                attachment_id=ref.attachment_id,
+                kind="resource",
+                name=ref.attachment_name,
+                is_image=False, # 图片暂时不是一种内部资源
+            ))
+
+        return refs
+
+    async def _load_images(
+        self, temp_attachments: List[TemporaryAttachmentRef],
+        support_vision: bool, lenient_load: bool, current_count: int = 0, current_total_bytes: int = 0
+    ) -> List[tuple[str, VisionImage]]:
+        """
+        加载附件中的图片
+        """
+
         image_refs: List[tuple[TemporaryAttachmentRef, str]] = []
 
         for ref in temp_attachments:
@@ -128,45 +183,116 @@ class ChatContextAssembler:
             if media_type:
                 image_refs.append((ref, media_type))
 
-        if not image_refs:
-            return []
+        if not image_refs: return []
+
         if not support_vision:
+            if lenient_load: return [] # 宽容模式下不报错
             raise ServiceException(ChatErrorCode.MODEL_VISION_UNSUPPORTED)
-        if len(image_refs) > settings.VISION_MAX_IMAGE_COUNT:
-            raise ServiceException(ChatErrorCode.IMAGE_INPUT_INVALID, custom_msg="too many images in one query")
+
+        remaining_count = settings.VISION_MAX_IMAGE_COUNT - current_count
+        if len(image_refs) > remaining_count:
+            if lenient_load: image_refs = image_refs[:max(0, remaining_count)] # 宽容模式下可加载到最大限制数量
+            else: raise ServiceException(ChatErrorCode.IMAGE_INPUT_INVALID, custom_msg="too many images in one query")
+
+        if not image_refs: return []
+
         if any(ref.file_size > settings.VISION_MAX_IMAGE_BYTES for ref, _ in image_refs):
-            raise ServiceException(ChatErrorCode.IMAGE_INPUT_INVALID, custom_msg="an image exceeds the size limit")
-        if sum(ref.file_size for ref, _ in image_refs) > settings.VISION_MAX_TOTAL_IMAGE_BYTES:
+            if lenient_load: # 宽容模式下加载符合最大尺寸限制的单图
+                image_refs = [(ref, media_type) for ref, media_type in image_refs if ref.file_size <= settings.VISION_MAX_IMAGE_BYTES]
+            else: raise ServiceException(ChatErrorCode.IMAGE_INPUT_INVALID, custom_msg="an image exceeds the size limit")
+
+        if current_total_bytes + sum(ref.file_size for ref, _ in image_refs) > settings.VISION_MAX_TOTAL_IMAGE_BYTES and not lenient_load:
             raise ServiceException(ChatErrorCode.IMAGE_INPUT_INVALID, custom_msg="total image size exceeds the limit")
 
-        images: List[InlineImage] = []
-        total_bytes = 0
+        images: List[tuple[str, VisionImage]] = []
         for ref, media_type in image_refs:
             try:
                 raw = await self.oss_file_loader.load_by_object_key(ref.object_key)
             except Exception as exc:
-                raise ServiceException(
-                    ChatErrorCode.IMAGE_INPUT_INVALID,
-                    custom_msg=f"failed to load image attachment {ref.attachment_id}",
-                ) from exc
+                if lenient_load: continue # 宽容模式下跳过
+                raise ServiceException(ChatErrorCode.IMAGE_INPUT_INVALID, custom_msg=f"failed to load image attachment {ref.attachment_id}",) from exc
 
-            total_bytes += len(raw)
-            if (
-                not raw
-                or len(raw) > settings.VISION_MAX_IMAGE_BYTES
-                or total_bytes > settings.VISION_MAX_TOTAL_IMAGE_BYTES
-            ):
-                raise ServiceException(
-                    ChatErrorCode.IMAGE_INPUT_INVALID,
-                    custom_msg="loaded image data exceeds the limit",
-                )
-            images.append(InlineImage(
-                attachment_id=ref.attachment_id,
-                media_type=media_type,
-                base64_data=base64.b64encode(raw).decode("ascii"),
-            ))
-
+            images.append((ref.attachment_id, VisionImage(media_type=media_type, base64_data=base64.b64encode(raw).decode("ascii"),)))
         return images
+
+    async def _prepare_history_messages(
+        self,
+        history_messages: List[ChatMessage],
+        temp_attachments: List[TemporaryAttachmentRef],
+        support_vision: bool,
+        current_image_count: int,
+        current_total_bytes: int,
+    ) -> List[ChatMessage]:
+        """
+        找出历史里带图片的用户消息，在预算允许时自动把最近几轮的历史图片加载回上下文
+        对未自动加载的历史图片，补文本占位保留引用痕迹
+        """
+
+        prepared = [message.model_copy(deep=True) for message in history_messages] # 深拷贝历史消息
+        # 计算当前轮已经占掉多少图片名额和字节预算
+        temp_by_id = {ref.attachment_id: ref for ref in temp_attachments}
+
+        # 挑选带图片附件的用户消息
+        image_user_messages = [
+            message for message in prepared
+            if message.role == Role.USER and any(attachment.is_image for attachment in message.attachments)
+        ]
+        auto_load_ids: set[str] = set()
+
+        used_count = current_image_count
+        used_bytes = current_total_bytes
+        history_turn_limit = max(0, settings.VISION_HISTORY_IMAGE_TURN_LIMIT)
+
+        if settings.VISION_ENABLE_HISTORY_IMAGE_AUTO_LOAD and support_vision and history_turn_limit > 0:
+            recent_user_messages = image_user_messages[-history_turn_limit:]  # 只看最近 N 轮
+            for message in reversed(recent_user_messages):
+                if used_count >= settings.VISION_MAX_IMAGE_COUNT:
+                    break
+                if used_bytes >= settings.VISION_MAX_TOTAL_IMAGE_BYTES:
+                    break
+                candidate_refs = []
+                for attachment in message.attachments:
+                    if not attachment.is_image: continue # 非图片附件，跳过
+                    ref = temp_by_id.get(attachment.attachment_id)
+                    if ref is None : continue # 确保仍在会话的附件中，且不超过图片比特限制
+                    candidate_refs.append(ref)
+
+                images = await self._load_images(
+                    candidate_refs,
+                    support_vision=True,
+                    lenient_load=True,
+                    current_count=used_count,
+                    current_total_bytes=used_bytes,
+                ) # 宽容模式批量加载
+
+                if not images: continue
+
+                message.imgs.extend(image for _, image in images)
+                auto_load_ids.update(attachment_id for attachment_id, _ in images)
+
+                used_count += len(images)
+                used_bytes += sum(
+                    temp_by_id[attachment_id].file_size or 0
+                    for attachment_id, _ in images if attachment_id in temp_by_id
+                )
+
+        for message in prepared:
+            # 为没加载的图片补文字占位
+            excluded_ids = {
+                attachment.attachment_id
+                for attachment in message.attachments
+                if attachment.is_image and attachment.attachment_id not in auto_load_ids
+            }
+            placeholders = [
+                _IMAGE_PLACEHOLDER_TEMPLATE.format(name=attachment.name, attachment_id=attachment.attachment_id)
+                for attachment in message.attachments
+                if attachment.is_image and attachment.attachment_id in excluded_ids
+            ]
+            if not placeholders: continue
+            suffix = "\n".join(placeholders)
+            message.content = f"{message.content or ''}\n\n{suffix}".strip()
+
+        return prepared
 
     async def assemble_prompt(
         self,
@@ -184,6 +310,20 @@ class ChatContextAssembler:
         support_vision: bool = False,
     ) -> List[ChatMessage]:
         """组装最终发往 LLM 的消息列表"""
+        temp_attachments = temp_attachments or []
+        resource_attachments = resource_attachments or []
+        user_defined_attachment_ids = user_defined_attachment_ids or []
+        user_defined_image_refs = [
+            ref for ref in temp_attachments
+            if ref.attachment_id in set(user_defined_attachment_ids)
+            and _IMAGE_MEDIA_TYPES.get(ref.extension.lower())
+        ]
+        # 加载当前会话的图片
+        query_images = [image for _, image in await self._load_images(
+            user_defined_image_refs,
+            support_vision=support_vision,
+            lenient_load=False,
+        )]
 
         # Message 列表初始化并加入 System Prompt
         messages: List[ChatMessage] = [
@@ -200,6 +340,13 @@ class ChatContextAssembler:
             ))
 
         # 追加近期对话明细
+        history_messages = await self._prepare_history_messages(
+            history_messages=history_messages,
+            temp_attachments=temp_attachments,
+            support_vision=support_vision,
+            current_image_count=len(query_images),
+            current_total_bytes=sum(ref.file_size for ref in user_defined_image_refs),
+        ) # 处理历史消息中的图片
         messages.extend(history_messages)
 
         # -- 以上消息在多轮对话中保持公共前缀，可命中缓存 --
@@ -245,12 +392,12 @@ class ChatContextAssembler:
             'name': temp_attachment.attachment_name,
             'extension': temp_attachment.extension,
             'size': temp_attachment.file_size // 1024,
-        } for temp_attachment in (temp_attachments or [])]
+        } for temp_attachment in temp_attachments]
         resource_attachments_context = [{
             'attachment_id': resource_attachment.attachment_id,
             'name': resource_attachment.attachment_name,
             'resource_type': resource_attachment.resource_type,
-        } for resource_attachment in (resource_attachments or [])]
+        } for resource_attachment in resource_attachments]
         if temp_attachments or resource_attachments or user_defined_attachment_ids:
             context_blocks["session_attachments"] = {
                 "temporary_attachments": temp_attachments_context,
@@ -272,17 +419,12 @@ class ChatContextAssembler:
         else:
             final_user_content = user_query
 
-        query_images = await self._resolve_query_images(
-            temp_attachments or [],
-            support_vision=support_vision,
-        )
-
         # 该 Message 不持久化
         messages.append(ChatMessage(
             session_id=session_id,
             role=Role.USER,
             content=final_user_content,
-            imgs=query_images,
+            imgs=query_images # 加载图片
         ))
 
         return messages

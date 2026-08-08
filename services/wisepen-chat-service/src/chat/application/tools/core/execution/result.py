@@ -3,6 +3,7 @@ from datetime import datetime
 from typing import Any
 
 from chat.application.tools.core.llm.invocation import ToolInvocation
+from chat.domain.entities import VisionImage
 
 @dataclass
 class ToolExecutionError(Exception):
@@ -15,12 +16,19 @@ class ToolExecutionError(Exception):
         super().__init__(self.detail_reason or self.reason)
 
 @dataclass(frozen=True)
+class ToolExecutionImageOutput:
+    text: str
+    images: list[VisionImage] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
 class ToolExecutionResult:
     tool_invocation: ToolInvocation
     tool_output: Any | None
     started_at: datetime
     finished_at: datetime
     tool_execution_error: ToolExecutionError | None = None
+    images: list[VisionImage] = field(default_factory=list)
 
 @dataclass(frozen=True)
 class ToolBatchResult:

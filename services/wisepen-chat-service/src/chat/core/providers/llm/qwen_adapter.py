@@ -151,7 +151,7 @@ class QwenAdapter(LLMProvider):
         messages: List[ChatMessage],
         multimodal: bool = False,
     ) -> List[Dict[str, Any]]:
-        # DashScope 多模态消息使用 image/text content，工具结果仍是 role="tool" message
+        # DashScope 使用 OpenAI-compatible messages，工具结果是 role="tool" message
         result = []
         for msg in messages:
             # 只回放 Qwen 自己保存的 assistant 原生消息，其他 provider payload 只能降级为可见文本
@@ -163,19 +163,20 @@ class QwenAdapter(LLMProvider):
                 continue
             if msg.role == Role.TOOL:
                 # Qwen 工具结果使用 OpenAI-compatible 的 role="tool" message
+                content: Any = msg.content or ""
+                if multimodal:
+                    content = [{"text": msg.content or ""}]
+                    content.extend({"image": f"data:{img.media_type};base64,{img.base64_data}"} for img in msg.imgs)
                 result.append({
                     "role": "tool",
-                    "tool_call_id": msg.tool_call_id, "name": msg.tool_name, "content": msg.content or "",
+                    "tool_call_id": msg.tool_call_id, "name": msg.tool_name, "content": content or "",
                 })
                 continue
             # 对于用户消息，或其他非 Qwen 提供的消息
             content: Any = msg.content or ""
             if multimodal:
-                content = [
-                    {"image": f"data:{img.media_type};base64,{img.base64_data}"}
-                    for img in msg.imgs
-                ]
-                content.append({"text": msg.content or ""})
+                content = [{"text": msg.content or ""}]
+                content.extend({"image": f"data:{img.media_type};base64,{img.base64_data}"} for img in msg.imgs)
             result.append({
                 "role": msg.role.value,
                 "content": content,

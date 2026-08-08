@@ -31,7 +31,6 @@ class TemporaryAttachmentRefResponse(BaseModel):
     def from_entity(cls, ref: TemporaryAttachmentRef) -> "TemporaryAttachmentRefResponse":
         return cls(
             attachment_id=ref.attachment_id,
-            # 当前 ref  没有 attachment_type 字段
             attachment_type="temporary",
             attachment_name=ref.attachment_name,
             object_key=ref.object_key,
@@ -52,7 +51,6 @@ class ResourceAttachmentRefResponse(BaseModel):
     def from_entity(cls, ref: ResourceAttachmentRef) -> "ResourceAttachmentRefResponse":
         return cls(
             attachment_id=ref.attachment_id,
-            # 当前 ref  没有 attachment_type 字段
             attachment_type="resource",
             attachment_name=ref.attachment_name,
             resource_id=ref.resource_id,
@@ -113,3 +111,4 @@ class UIMessageResponse(BaseModel):
     role: str
     parts: List[UIMessagePartResponse]
     createdAt: Optional[str] = None
+    metadata: Optional[dict[str, Any]] = None

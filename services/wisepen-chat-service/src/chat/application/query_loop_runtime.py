@@ -456,6 +456,7 @@ class QueryLoopRuntime:
                         tool_call_id=result.tool_call_id,
                         tool_name=result.tool_name,
                         content=result.tool_output,
+                        imgs=result.images,
                         persisted_output_placeholder=result.persisted_output_placeholder,
                     )
                 )

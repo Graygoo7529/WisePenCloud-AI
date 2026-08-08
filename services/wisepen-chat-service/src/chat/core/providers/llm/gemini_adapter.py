@@ -147,9 +147,14 @@ class GeminiAdapter(LLMProvider):
                 continue
             if msg.role == Role.TOOL:
                 # 执行工具结果以 role user 的 parts 返回，包含 function_response part 且 name 对应返回的 name
+                parts: list[Any] = [{"function_response": {"name": msg.tool_name or "", "response": {"result": msg.content or ""}}}]
+                parts.extend(
+                    types.Part.from_bytes(data=base64.b64decode(img.base64_data), mime_type=img.media_type)
+                    for img in msg.imgs
+                )
                 contents.append({
                     "role": "user",
-                    "parts": [{"function_response": {"name": msg.tool_name or "", "response": {"result": msg.content or ""}}}],
+                    "parts": parts,
                 })
                 continue
             # 对于用户消息，或其他非 GEMINI 提供的消息

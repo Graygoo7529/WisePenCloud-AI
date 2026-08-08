@@ -149,9 +149,16 @@ class AnthropicAdapter(LLMProvider):
             if msg.role == Role.TOOL:
                 # 执行工具结果以 role user 的 content 返回，包含 tool_result block 且 tool_use_id 对应返回的 tool_use.id
                 # https://platform.claude.com/docs/en/agents-and-tools/tool-use/handle-tool-calls
+                content = [{"type": "tool_result", "tool_use_id": msg.tool_call_id, "content": msg.content or ""}]
+                if msg.imgs:
+                    content.extend([
+                        {"type": "image",
+                         "source": {"type": "base64", "media_type": img.media_type, "data": img.base64_data}}
+                        for img in msg.imgs
+                    ])
                 anthropic_messages.append({
                     "role": "user",
-                    "content": [{"type": "tool_result", "tool_use_id": msg.tool_call_id, "content": msg.content or ""}],
+                    "content": content,
                 })
                 continue
             # 如果当前消息是 ANTHROPIC 提供的，且存在 provider_payload，则直接取出
@@ -162,16 +169,11 @@ class AnthropicAdapter(LLMProvider):
                 })
                 continue
             # 对于用户消息，或其他非 ANTHROPIC 提供的消息
-            content: Any = msg.content or ""
+            content = [{"type": "text", "text": msg.content or ""}]
             if msg.imgs:
-                content = [{"type": "text", "text": msg.content or ""}]
                 content.extend({
                     "type": "image",
-                    "source": {
-                        "type": "base64",
-                        "media_type": img.media_type,
-                        "data": img.base64_data,
-                    },
+                    "source": {"type": "base64", "media_type": img.media_type, "data": img.base64_data}
                 } for img in msg.imgs)
             anthropic_messages.append({
                 "role": "assistant" if msg.role == Role.ASSISTANT else "user",

@@ -158,7 +158,13 @@ class OpenAIAdapter(LLMProvider):
                 # 如果最近一次 OpenAI assistant response 后面有工具结果，就不回放完整历史
                 # 只把工具结果作为 input，同时带上 previous_response_id
                 if msg.role == Role.TOOL:
-                    outputs.append({"type": "function_call_output", "call_id": msg.tool_call_id, "output": msg.content or ""})
+                    output = [{"type": "input_text", "text": msg.content or ""}]
+                    if msg.imgs:
+                        output.extend({
+                            "type": "input_image",
+                            "image_url": f"data:{img.media_type};base64,{img.base64_data}",
+                        } for img in msg.imgs)
+                    outputs.append({"type": "function_call_output", "call_id": msg.tool_call_id, "output": output})
             if outputs:
                 return outputs, instructions, messages[last_response_index].provider_payload['response_id']
 
@@ -173,13 +179,18 @@ class OpenAIAdapter(LLMProvider):
                 continue
             if msg.role == Role.TOOL:
                 # 执行工具后继续 conversation 应发送一个新的 user message，工具结果放置于 function_call_output 且 call_id 对应返回的 call_id / id
-                items.append({"type": "function_call_output", "call_id": msg.tool_call_id, "output": msg.content or ""})
+                output = [{"type": "input_text", "text": msg.content or ""}]
+                if msg.imgs:
+                    output.extend({
+                            "type": "input_image",
+                            "image_url": f"data:{img.media_type};base64,{img.base64_data}",
+                    } for img in msg.imgs)
+                items.append({"type": "function_call_output", "call_id": msg.tool_call_id, "output": output})
                 continue
             # 对于用户消息，或其他非 OpenAI Responses 提供的消息
             role = "assistant" if msg.role == Role.ASSISTANT else "user"
-            content: Any = msg.content or ""
+            content: Any = [{"type": "input_text", "text": msg.content or ""}]
             if msg.imgs:
-                content = [{"type": "input_text", "text": msg.content or ""}]
                 content.extend({
                     "type": "input_image",
                     "image_url": f"data:{img.media_type};base64,{img.base64_data}",
