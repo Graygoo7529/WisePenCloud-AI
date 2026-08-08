@@ -157,8 +157,6 @@ async def get_session_messages(
     tool_states = {}
     if page == 1:
         pending = await suspended_chat_repo.find_suspended_by_session(session_id, user_id)
-        # 普通、空白或已完成会话没有 SuspendedChat；仅在存在挂起记录时读取 context，
-        # 避免历史首页对 None 解引用并返回 HTTP 500。
         if pending is not None:
             pending_messages = list(pending.context.chat_record_messages)
             for item in pending.context.turn_suspension.classified_tool_invocation_plan.approval_required_tools:

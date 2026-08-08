@@ -7,7 +7,6 @@ from chat.api.vercel_formats import (
     text_start, text_delta, text_end,
     reasoning_start, reasoning_delta, reasoning_end,
     tool_input_start, tool_input_available, tool_output_available,
-    # 名称必须与 vercel_formats 的实际导出一致，否则 Chat API 会在启动导入阶段失败。
     tool_error, tool_denied, tool_approval_request, error,
 )
 from chat.application.events import (
