@@ -35,6 +35,9 @@ class RedisChatTurnStream:
     def _stream_key(self, turn_id: str) -> str:
         return f"chat:turn:{turn_id}:events"
 
+    def _cancel_key(self, turn_id: str) -> str:
+        return f"chat:turn:{turn_id}:cancel_requested"
+
     async def acquire_active_turn(self, user_id: str, session_id: str, turn_id: str) -> bool:
         # 原子写入，等价于 Redis 命令 SET chat:session:{user_id}:{session_id}:active_turn {turn_id} NX EX 1800
         # key 表示 这个用户的这个会话当前正在跑哪个 turn，用于防止一个会话有多个 trun 出现
@@ -69,6 +72,13 @@ class RedisChatTurnStream:
             turn_id,
         )
         return bool(result)
+
+    async def request_turn_cancel(self, turn_id: str) -> None:
+        # 取消请求只需要一个短期标记，runner 会在安全点读取并自行收尾。
+        await self.redis.set(self._cancel_key(turn_id), "1", ex=self.stream_ttl)
+
+    async def is_turn_cancel_requested(self, turn_id: str) -> bool:
+        return await self.redis.get(self._cancel_key(turn_id)) == "1"
 
     async def append_frame(self, turn_id: str, frame: str, *, terminal: bool = False) -> str:
         # 将一个 SSE frame 写到当前 turn 的事件流里

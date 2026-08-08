@@ -50,6 +50,10 @@ class ChatRecoverRequest(BaseModel):
 
         return self
 
+
+class ChatCancelRequest(BaseModel):
+    session_id: str = Field(..., min_length=1, description="目标会话 ID；必须属于当前登录用户。")
+
 class ChatRequest(BaseModel):
     """
     聊天请求传输对象

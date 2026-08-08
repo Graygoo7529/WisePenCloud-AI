@@ -8,7 +8,7 @@ from dependency_injector.wiring import inject, Provide
 from common.core.domain import R
 from common.security import require_login
 from common.logger import info
-from chat.api.schemas.chat import ActiveChatTurnResponse, ChatRequest, ChatRecoverRequest
+from chat.api.schemas.chat import ActiveChatTurnResponse, ChatCancelRequest, ChatRequest, ChatRecoverRequest
 from chat.application.chat_turn_coordinator import ChatTurnCoordinator
 from chat.application.chat_turn_stream_manager import ChatTurnStreamManager
 from chat.application.tools.core.definition import ClientToolResult, ToolApprovalStatus
@@ -72,7 +72,7 @@ async def chat_completions(
     turn_id = await turn_stream_manager.start_turn(
         user_id=user_id,
         session_id=req.session_id,
-        build_chat_gen=lambda background_tasks: coordinator.handle_new_chat_start(
+        build_chat_gen=lambda background_tasks, turn_id: coordinator.handle_new_chat_start(
             user_id=user_id,
             session_id=req.session_id,
             user_query=req.query,
@@ -94,6 +94,7 @@ async def chat_completions(
                 )
                 for item in req.client_tool_capabilities
             ],
+            cancel_requested=lambda: turn_stream_manager.is_turn_cancel_requested(turn_id),
         ),
     )
 
@@ -155,7 +156,7 @@ async def chat_recover(
     turn_id = await turn_stream_manager.start_turn(
         user_id=user_id,
         session_id=req.session_id,
-        build_chat_gen=lambda background_tasks: coordinator.handle_suspended_chat_recover(
+        build_chat_gen=lambda background_tasks, turn_id: coordinator.handle_suspended_chat_recover(
             user_id=user_id,
             session_id=req.session_id,
             client_tool_results=[
@@ -174,6 +175,7 @@ async def chat_recover(
                 for item in req.tool_approval_status
             ],
             background_tasks=background_tasks,
+            cancel_requested=lambda: turn_stream_manager.is_turn_cancel_requested(turn_id),
         ),
     )
 
@@ -182,4 +184,17 @@ async def chat_recover(
         media_type="text/event-stream",
         headers=_SSE_HEADERS,
     )
+
+
+@router.post("/completions/cancel", summary="取消当前正在运行的 Chat Turn")
+@inject
+async def chat_cancel(
+    req: ChatCancelRequest,
+    user_id: str = Depends(require_login),
+    turn_stream_manager: ChatTurnStreamManager = Depends(Provide[Container.chat_turn_stream_manager]),
+    session_repo: SessionRepository = Depends(Provide[Container.session_repo]),
+):
+    await session_repo.get_session_for_user(req.session_id, user_id)
+    await turn_stream_manager.cancel_turn(user_id=user_id, session_id=req.session_id)
+    return R.success()
 

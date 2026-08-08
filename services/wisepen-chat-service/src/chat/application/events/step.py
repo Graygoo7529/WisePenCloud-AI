@@ -30,3 +30,4 @@ class StepFinishEvent(StreamEvent):
     final_assistant_message: Optional[ChatMessage] = None
     token_usage: int = field(default_factory=int)
     suspension: Optional[TurnSuspension] = None
+    aborted: bool = False

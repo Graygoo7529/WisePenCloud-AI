@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from typing import Optional, List, Dict, Any, Set
+from typing import Optional, List, Dict, Any, Set, Awaitable, Callable
 from beanie import PydanticObjectId
 from fastapi import BackgroundTasks
 
@@ -106,6 +106,7 @@ class ChatTurnCoordinator:
             client_tool_results: list[ClientToolResult],
             tool_approval_status: List[ToolApprovalStatus],
             background_tasks: BackgroundTasks,
+            cancel_requested: Callable[[], Awaitable[bool]] | None = None,
     ):
         suspended_chat: SuspendedChat | None = await self._suspended_chat_repo.find_suspended_by_session(session_id, user_id)
         if suspended_chat is None:
@@ -126,7 +127,12 @@ class ChatTurnCoordinator:
             token_usage=suspended_chat.context.token_usage
         )
 
-        async for event in self.query_llm(chat_turn_context, client_tool_results, tool_approval_status):
+        async for event in self.query_llm(
+            chat_turn_context=chat_turn_context,
+            client_tool_results=client_tool_results,
+            tool_approval_status=tool_approval_status,
+            cancel_requested=cancel_requested,
+        ):
             yield event
         self.set_background_task(background_tasks, chat_turn_context)
 
@@ -151,6 +157,7 @@ class ChatTurnCoordinator:
             user_defined_on_demand_skill_ids: Optional[Set[str]] = None,
             user_defined_force_enabled_skill_ids: Optional[Set[str]] = None,
             client_tool_capabilities: list[ClientToolCapability] | None = None,
+            cancel_requested: Callable[[], Awaitable[bool]] | None = None,
     ):
         chat_turn_context = ChatTurnContext()
         chat_turn_context.session_id = session_id
@@ -310,7 +317,12 @@ class ChatTurnCoordinator:
         )]
 
         chat_turn_context.token_usage = 0
-        async for event in self.query_llm(chat_turn_context, client_tool_results=None, tool_approval_status=None):
+        async for event in self.query_llm(
+                chat_turn_context=chat_turn_context,
+                client_tool_results=None,
+                tool_approval_status=None,
+                cancel_requested=cancel_requested,
+        ):
             yield event
         self.set_background_task(background_tasks, chat_turn_context)
 
@@ -318,7 +330,8 @@ class ChatTurnCoordinator:
             self,
             chat_turn_context: ChatTurnContext,
             client_tool_results: list[ClientToolResult] | None,
-            tool_approval_status: List[ToolApprovalStatus] | None
+            tool_approval_status: List[ToolApprovalStatus] | None,
+            cancel_requested: Callable[[], Awaitable[bool]] | None = None,
     ):
         # 流式推理
         try:
@@ -329,7 +342,8 @@ class ChatTurnCoordinator:
                 agent_max_iterations=chat_turn_context.agent_spec.agent_max_iterations,
                 model_info=chat_turn_context.model_info,
                 client_tool_results=client_tool_results,
-                tool_approval_status=tool_approval_status
+                tool_approval_status=tool_approval_status,
+                cancel_requested=cancel_requested,
             ):
                 # QueryLoopRuntime 产出的事件如果是 StepFinishEvent 额外处理消息累积
                 if isinstance(event, StepFinishEvent):
@@ -337,6 +351,10 @@ class ChatTurnCoordinator:
                     if not event.is_finished:
                         # 向 chat_record_messages 追加中间消息（Tool Calls）
                         chat_turn_context.chat_record_messages.extend(event.intermediate_messages)
+                        if event.aborted:
+                            yield to_vercel_sse(event)
+                            yield to_vercel_sse(ErrorEvent(error_text="本轮对话已被用户取消"))
+                            return
                         # SSE流需要中断（因调用客户端工具、需要工具调用批准等）
                         if event.suspension is not None:
                             chat_turn_context.messages_for_llm.extend(event.intermediate_messages)
