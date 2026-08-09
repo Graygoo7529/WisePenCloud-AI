@@ -1,6 +1,10 @@
-from abc import ABC, abstractmethod
+from __future__ import annotations
 
-from chat.domain.entities import SuspendedChat
+from abc import ABC, abstractmethod
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from chat.domain.entities.suspended_chat import SuspendedChat
 
 
 class SuspendedChatRepository(ABC):

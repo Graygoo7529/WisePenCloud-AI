@@ -109,8 +109,8 @@ class RedisChatTurnStream:
 
         # 如果已有事件重放完了，但还没结束，就进入循环
         while True:
-            # 从 last_id 之后继续读，如果暂时没有新事件，最多等 15 秒，一次最多读 50 条
-            result = await self.redis.xread({stream_key: last_id}, block=15000, count=50)
+            # 从 last_id 之后继续读，如果暂时没有新事件，最多等 4 秒，一次最多读 50 条
+            result = await self.redis.xread({stream_key: last_id}, block=4000, count=50)
             if not result:
                 continue # 继续循环
 
