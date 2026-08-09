@@ -11,6 +11,7 @@ from chat.domain.interfaces.llm import LLMEventType, LLMStreamEvent, LLMUsage
 from chat.domain.entities.message import ToolCallMessage
 from chat.domain.repositories.model_repo import ModelRequestInfo
 from common.core.exceptions import ServiceException
+from common.logger import error
 
 from .utils import dump_provider_value, json_object, without_none
 
@@ -111,6 +112,28 @@ class OpenAIAdapter(LLMProvider):
                     token_usage = int(getattr(usage, "total_tokens", 0) or 0) if usage else 0
                     if token_usage: # 传递 LLMStreamEvent USAGE
                         yield LLMStreamEvent(type=LLMEventType.USAGE, usage=LLMUsage(output_tokens=token_usage))
+                elif event_type in {"response.incomplete", "response.failed"}:
+                    # 非 completed 终止不能继续生成空 assistant，应记录上游详情并转换为业务错误
+                    response = getattr(event, "response", None)
+                    response_id = getattr(response, "id", None) or response_id
+                    status = getattr(response, "status", None) or event_type.split(".", 1)[1]
+                    provider_error = dump_provider_value(getattr(response, "error", None))
+                    incomplete_details = dump_provider_value(
+                        getattr(response, "incomplete_details", None)
+                    )
+                    error(
+                        "OpenAI Responses stream terminated without completion.",
+                        event_type=event_type,
+                        response_id=response_id,
+                        status=status,
+                        provider_error=provider_error,
+                        incomplete_details=incomplete_details,
+                    )
+                    raise RuntimeError(
+                        f"{event_type} status={status} "
+                        f"error={provider_error} "
+                        f"incomplete_details={incomplete_details}"
+                    )
         except Exception as e:
             raise ServiceException(ChatErrorCode.LLM_GENERATION_FAILED, custom_msg=f"OpenAI Responses Error: {e}")
 
