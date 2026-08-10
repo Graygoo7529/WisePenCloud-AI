@@ -16,6 +16,24 @@ from common.logger import error
 from .utils import dump_provider_value, json_object, without_none
 
 
+def _dump_openai_output_item(value: Any) -> Any:
+    if value is None:
+        return None
+    if hasattr(value, "to_dict"):
+        value = value.to_dict(mode="json", exclude_unset=True, exclude_none=True)
+    else:
+        value = dump_provider_value(value)
+    if isinstance(value, dict):
+        return {
+            key: _dump_openai_output_item(item)
+            for key, item in value.items()
+            if item is not None
+        }
+    if isinstance(value, list):
+        return [_dump_openai_output_item(item) for item in value]
+    return value
+
+
 class OpenAIAdapter(LLMProvider):
     """
     OpenAI 官方 Responses API 适配器
@@ -88,7 +106,7 @@ class OpenAIAdapter(LLMProvider):
                     response = getattr(event, "response", None)
                     response_id = getattr(response, "id", None)
                 elif event_type == "response.output_item.added": # OpenAI 开始输出一个 item
-                    current_item = dump_provider_value(getattr(event, "item", None)) or {}
+                    current_item = _dump_openai_output_item(getattr(event, "item", None)) or {}
                 elif event_type == "response.output_text.delta": # 文本增量
                     delta = getattr(event, "delta", None)
                     if delta:
@@ -100,7 +118,7 @@ class OpenAIAdapter(LLMProvider):
                 elif event_type == "response.function_call_arguments.delta" and current_item is not None: # 工具调用参数的增量
                     current_item["arguments"] = (current_item.get("arguments") or "") + (getattr(event, "delta", "") or "")
                 elif event_type == "response.output_item.done": # 一个 output item 输出完成
-                    item = dump_provider_value(getattr(event, "item", None)) or current_item
+                    item = _dump_openai_output_item(getattr(event, "item", None)) or current_item
                     if item:
                         # output_items 是整轮 OpenAI response 的原生输出集合，用于后续解析工具调用和作为 provider_payload
                         output_items.append(item)
@@ -198,7 +216,7 @@ class OpenAIAdapter(LLMProvider):
                 continue
             # 如果当前消息是 OpenAI Responses 提供的，且存在 provider_payload，则直接取出
             if msg.role == Role.ASSISTANT and msg.model_info and msg.model_info.provider_type == ProviderType.OPENAI and msg.provider_payload:
-                items.extend(msg.provider_payload["output"])
+                items.extend(_dump_openai_output_item(item) for item in msg.provider_payload["output"])
                 continue
             if msg.role == Role.TOOL:
                 # 执行工具后继续 conversation 应发送一个新的 user message，工具结果放置于 function_call_output 且 call_id 对应返回的 call_id / id
