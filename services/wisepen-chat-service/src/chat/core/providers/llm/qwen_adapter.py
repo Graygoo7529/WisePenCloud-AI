@@ -53,8 +53,9 @@ class QwenAdapter(LLMProvider):
         model_request: ModelRequestInfo,
         tools: Optional[List[Dict[str, Any]]] = None,
     ) -> AsyncGenerator[LLMStreamEvent, None]:
-        # 内部消息投影为 Qwen / DashScope message 格式
-        qwen_messages = self._qwen_messages_formatter(messages) # 消息
+        # 有图片时使用 DashScope 原生多模态格式，纯文本保持现有 Generation 格式
+        has_images = any(message.imgs for message in messages)
+        qwen_messages = self._qwen_messages_formatter(messages, multimodal=has_images) # 消息
 
         # 设置请求参数
         request_kwargs:dict[str, Any] = {
@@ -74,7 +75,8 @@ class QwenAdapter(LLMProvider):
         tool_call_payloads = []
         token_usage = 0
         try:
-            responses = dashscope.Generation.call(**without_none(request_kwargs))
+            call = dashscope.MultiModalConversation.call if has_images else dashscope.Generation.call
+            responses = call(**without_none(request_kwargs))
             # 流式调用
             for response in responses:
                 status_code = read_provider_value(response, "status_code")
@@ -99,6 +101,11 @@ class QwenAdapter(LLMProvider):
                     yield LLMStreamEvent(type=LLMEventType.REASONING_DELTA, delta=reasoning) # 传递 LLMStreamEvent REASONING_DELTA
                 # 文本增量
                 content = read_provider_value(message, "content")
+                if isinstance(content, list):
+                    content = "".join(
+                        str(read_provider_value(part, "text", "") or "")
+                        for part in content
+                    )
                 if content:
                     assistant_text += content
                     yield LLMStreamEvent(type=LLMEventType.TEXT_DELTA, delta=content) # 传递 LLMStreamEvent TEXT_DELTA
@@ -140,24 +147,38 @@ class QwenAdapter(LLMProvider):
         yield LLMStreamEvent(type=LLMEventType.STATE, provider_payload={"message": assistant_message})
 
     @staticmethod
-    def _qwen_messages_formatter(messages: List[ChatMessage]) -> List[Dict[str, Any]]:
-        # Qwen / DashScope 使用 OpenAI-compatible messages，工具结果是 role="tool" message
+    def _qwen_messages_formatter(
+        messages: List[ChatMessage],
+        multimodal: bool = False,
+    ) -> List[Dict[str, Any]]:
+        # DashScope 使用 OpenAI-compatible messages，工具结果是 role="tool" message
         result = []
         for msg in messages:
             # 只回放 Qwen 自己保存的 assistant 原生消息，其他 provider payload 只能降级为可见文本
             if msg.role == Role.ASSISTANT and msg.model_info and msg.model_info.provider_type == ProviderType.ALIBABA and msg.provider_payload:
-                result.append(msg.provider_payload["message"])
+                provider_message = dict(msg.provider_payload["message"])
+                if multimodal and not isinstance(provider_message.get("content"), list):
+                    provider_message["content"] = [{"text": provider_message.get("content") or ""}]
+                result.append(provider_message)
                 continue
             if msg.role == Role.TOOL:
                 # Qwen 工具结果使用 OpenAI-compatible 的 role="tool" message
+                content: Any = msg.content or ""
+                if multimodal:
+                    content = [{"text": msg.content or ""}]
+                    content.extend({"image": f"data:{img.media_type};base64,{img.base64_data}"} for img in msg.imgs)
                 result.append({
                     "role": "tool",
-                    "tool_call_id": msg.tool_call_id, "name": msg.tool_name, "content": msg.content or "",
+                    "tool_call_id": msg.tool_call_id, "name": msg.tool_name, "content": content or "",
                 })
                 continue
             # 对于用户消息，或其他非 Qwen 提供的消息
+            content: Any = msg.content or ""
+            if multimodal:
+                content = [{"text": msg.content or ""}]
+                content.extend({"image": f"data:{img.media_type};base64,{img.base64_data}"} for img in msg.imgs)
             result.append({
                 "role": msg.role.value,
-                "content": msg.content or ""
+                "content": content,
             })
         return result

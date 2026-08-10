@@ -1,18 +1,21 @@
+from __future__ import annotations
+
 import base64
 import pickle
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any, List, Optional
+from typing import TYPE_CHECKING, Any, List, Optional
 
 from beanie import Document
 from pydantic import Field, field_validator, field_serializer
 from pymongo import ASCENDING, IndexModel
 
-from chat.application.agents import AgentSpec
-from chat.application.chat_context_assembler import WindowedMessages
-from chat.application.events import TurnSuspension
-from chat.domain.entities import ChatMessage
-from chat.domain.repositories.model_repo import ModelRequestInfo
+if TYPE_CHECKING:
+    from chat.application.agents import AgentSpec
+    from chat.application.chat_context_assembler import WindowedMessages
+    from chat.application.events import TurnSuspension
+    from chat.domain.entities import ChatMessage
+    from chat.domain.repositories.model_repo import ModelRequestInfo
 
 @dataclass
 class SuspendedTurnContext:

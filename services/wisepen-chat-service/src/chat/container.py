@@ -43,6 +43,7 @@ from chat.application.tools.skill_tools import LoadSkillTool
 from chat.application.tools.core import ToolRegistry
 from chat.application.tools.core.mcp import McpClient, McpToolCatalog, SystemMcpToolCatalog
 from chat.application.tools.session_tools.get_historical_chat_messages_tool import GetHistoricalChatMessagesTool
+from chat.application.tools.session_tools.load_image_attachment_tool import LoadImageAttachmentTool
 from chat.core.config.nacos import nacos_client_manager
 from chat.service_client import FileStorageClient, AIAssetClient, McpServiceClient, ResourceClient
 from common.cloud.service_discovery import ServiceDiscovery
@@ -189,6 +190,10 @@ class Container(containers.DeclarativeContainer):
         GetHistoricalChatMessagesTool,
         message_repo=message_repo,
     )
+    load_image_attachment_tool = providers.Singleton(
+        LoadImageAttachmentTool,
+        file_loader=oss_file_loader,
+    )
     # LoadSkillTool / LoadSkillAssetTool
     load_skill_tool = providers.Singleton(
         LoadSkillTool,
@@ -204,6 +209,7 @@ class Container(containers.DeclarativeContainer):
     )
     tool_providers = providers.List(
         search_history_tool,
+        load_image_attachment_tool,
         load_skill_tool,
         load_skill_asset_tool,
     )
@@ -233,6 +239,7 @@ class Container(containers.DeclarativeContainer):
         skill_matcher=skill_matcher,
         suspended_chat_repo=suspended_chat_repo,
         agent_resolver=agent_resolver,
+        oss_file_loader=oss_file_loader,
     )
 
     chat_turn_stream_manager = providers.Singleton(

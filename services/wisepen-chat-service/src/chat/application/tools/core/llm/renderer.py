@@ -3,6 +3,7 @@ from typing import Any
 
 from chat.application.tools.core.definition import ToolLLMSpec, ToolDefinition
 from chat.application.tools.core.execution.result import ToolExecutionResult
+from chat.domain.entities import VisionImage
 
 
 def schema_renderer(llm_spec: ToolLLMSpec) -> dict[str, Any]:
@@ -21,6 +22,7 @@ class RenderToolResult:
     tool_name: str
     persisted_output_placeholder: str | None
     tool_output: Any | None
+    images: list[VisionImage]
 
 def tool_result_renderer(tool_result: ToolExecutionResult, tool_definition: ToolDefinition | None) -> RenderToolResult:
     if tool_result.tool_execution_error is not None:
@@ -47,5 +49,6 @@ def tool_result_renderer(tool_result: ToolExecutionResult, tool_definition: Tool
         tool_call_id=tool_result.tool_invocation.tool_call_id,
         tool_name=tool_result.tool_invocation.tool_name,
         persisted_output_placeholder=persisted_output_placeholder,
-        tool_output=output
+        tool_output=output,
+        images=tool_result.images,
     )
