@@ -80,7 +80,7 @@ class OpenAIAdapter(LLMProvider):
         client = AsyncOpenAI(**client_kwargs)
 
         # 内部消息投影为 OpenAI Responses API input 格式
-        request_input, instructions, previous_response_id = self._openai_messages_formatter(messages)
+        request_input, instructions = self._openai_messages_formatter(messages)
 
         # 设置请求参数
         request_kwargs:dict[str, Any] = {
@@ -88,7 +88,6 @@ class OpenAIAdapter(LLMProvider):
             "input": request_input, # 消息
             "instructions": instructions or None, # system prompt
             "tools": self._openai_tools_formatter(tools), # 工具集
-            "previous_response_id": previous_response_id, # Responses API 续写 id
             "stream": True,
             **model_request.runtime_options
         }
@@ -102,7 +101,7 @@ class OpenAIAdapter(LLMProvider):
             # 流式调用
             async for event in stream:
                 event_type = getattr(event, "type", "")
-                if event_type == "response.created": # OpenAI 创建了一个 response，可用于下一轮 previous_response_id，尤其 tool calling 时
+                if event_type == "response.created": # OpenAI 创建了一个 response，记录 id 用于诊断
                     response = getattr(event, "response", None)
                     response_id = getattr(response, "id", None)
                 elif event_type == "response.output_item.added": # OpenAI 开始输出一个 item
@@ -169,47 +168,15 @@ class OpenAIAdapter(LLMProvider):
         if calls: # 传递 LLMStreamEvent TOOL_CALLS
             yield LLMStreamEvent(type=LLMEventType.TOOL_CALLS, tool_calls=calls)
 
-        # 保存 Responses 原生 output items 与 response_id，供下一轮协议回放
+        # 保存 Responses 原生 output items 供下一轮协议回放，并保留 response_id 用于诊断
         yield LLMStreamEvent(type=LLMEventType.STATE, provider_payload={"output": output_items, "response_id": response_id})
 
     @staticmethod
-    def _openai_messages_formatter(messages: List[ChatMessage]) -> tuple[list[Any], str, str | None]:
+    def _openai_messages_formatter(messages: List[ChatMessage]) -> tuple[list[Any], str]:
         # 提取 system prompt 为 instructions 参数
         instructions = "\n\n".join(msg.content or "" for msg in messages if msg.role == Role.SYSTEM)
 
-        # 查找最近的 OpenAI response_id
-        # Responses API 支持在上一次 response 的基础上继续
-        # 典型 OpenAI Responses tool calling 流程是: 返回 response.id + function_call -> 执行工具 -> 再调用 Responses API，传 previous_response_id + function_call_output
-        last_response_index = next((
-            i
-            for i in range(len(messages) - 1, -1, -1)
-            if (
-                messages[i].role == Role.ASSISTANT
-                and messages[i].model_info
-                and messages[i].model_info.provider_type == ProviderType.OPENAI
-                and messages[i].provider_payload
-                and messages[i].provider_payload.get("response_id")
-            )
-        ), -1) # 从后往前找最近一条 provider_type == OPENAI 并且 response_id 存在的消息
-
-        # 如果找到 response_id，优先构造 continuation input
-        if last_response_index >= 0:
-            outputs = []
-            for msg in messages[last_response_index + 1:]:
-                # 如果最近一次 OpenAI assistant response 后面有工具结果，就不回放完整历史
-                # 只把工具结果作为 input，同时带上 previous_response_id
-                if msg.role == Role.TOOL:
-                    output = [{"type": "input_text", "text": msg.content or ""}]
-                    if msg.imgs:
-                        output.extend({
-                            "type": "input_image",
-                            "image_url": f"data:{img.media_type};base64,{img.base64_data}",
-                        } for img in msg.imgs)
-                    outputs.append({"type": "function_call_output", "call_id": msg.tool_call_id, "output": output})
-            if outputs:
-                return outputs, instructions, messages[last_response_index].provider_payload['response_id']
-
-        # 如果没有可续写工具结果，就走完整 input 回放
+        # 始终进行无状态完整回放，避免依赖上游保存 response_id
         items: list[Any] = []
         for msg in messages:
             if msg.role == Role.SYSTEM:
@@ -240,7 +207,7 @@ class OpenAIAdapter(LLMProvider):
                 "role": role,
                 "content": content,
             })
-        return items, instructions, None
+        return items, instructions
 
     @staticmethod
     def _openai_tools_formatter(tools: Optional[List[Dict[str, Any]]]) -> Optional[List[Dict[str, Any]]]:
