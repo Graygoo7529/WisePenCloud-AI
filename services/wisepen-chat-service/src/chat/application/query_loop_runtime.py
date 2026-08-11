@@ -413,7 +413,7 @@ class QueryLoopRuntime:
                     raise asyncio.CancelledError
                 # 通过工具 core 并发执行并归约结果
                 output = await self._tool_dispatcher.dispatch(classified_tool_invocations.server_tools, tool_scope)
-                tool_outputs.extend(output.results)
+                tool_outputs.extend(output)
             else: # 当前有客户端工具的调用结果和工具批准状态
                 # 无需再为每个 parsed tool_call 产生两阶段 input 事件（历史上已经产生了）
 
@@ -433,7 +433,7 @@ class QueryLoopRuntime:
 
                     # 通过工具 core 并发执行并归约结果
                     output = await self._tool_dispatcher.dispatch(classified_tool_invocations.approval_required_tools, tool_scope)
-                    tool_outputs.extend(output.results)
+                    tool_outputs.extend(output)
                 # 如果有客户端工具
                 if classified_tool_invocations.client_tools:
                     # 通过工具 core 并发执行并归约结果
@@ -443,7 +443,7 @@ class QueryLoopRuntime:
                     if cancel_requested is not None and await cancel_requested():
                         raise asyncio.CancelledError
                     output = await self._tool_dispatcher.client_dispatch(classified_tool_invocations.client_tools, client_tool_results, tool_scope)
-                    tool_outputs.extend(output.results)
+                    tool_outputs.extend(output)
 
             for result in tool_outputs:
                 tool = tool_scope.get(result.tool_invocation.tool_name)
