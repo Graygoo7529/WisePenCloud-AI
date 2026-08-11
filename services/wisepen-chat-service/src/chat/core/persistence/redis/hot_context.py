@@ -1,15 +1,15 @@
 import json
+import redis.asyncio as redis
 from typing import List
 
-from chat.core.persistence.redis.base import RedisRepository
+from chat.core.config.app_settings import settings
 from chat.domain.entities import ChatMessage
 from chat.domain.repositories import HotContextRepository
-from redis.asyncio import Redis
 
 
-class RedisHotContext(RedisRepository, HotContextRepository):
-    def __init__(self, *, redis_client: Redis) -> None:
-        super().__init__(redis_client=redis_client)
+class RedisHotContext(HotContextRepository):
+    def __init__(self) -> None:
+        self.redis = redis.from_url(settings.REDIS_URL, decode_responses=True)
         self.ttl = 3600 * 24 * 7  # 会话上下文保留一个周
 
     def _get_key(self, session_id: str) -> str:
@@ -24,7 +24,7 @@ class RedisHotContext(RedisRepository, HotContextRepository):
     async def append_messages(self, session_id: str, messages: List[ChatMessage], max_length: int = 50) -> None:
         key = self._get_key(session_id)
         serialized = self._serialize(messages)
-        async with self._redis.pipeline(transaction=True) as pipe:
+        async with self.redis.pipeline(transaction=True) as pipe:
             await pipe.rpush(key, *serialized)
             await pipe.ltrim(key, -max_length, -1)
             await pipe.expire(key, self.ttl)
@@ -32,7 +32,7 @@ class RedisHotContext(RedisRepository, HotContextRepository):
 
     async def get_recent_context(self, session_id: str) -> List[ChatMessage]:
         key = self._get_key(session_id)
-        raw_msgs = await self._redis.lrange(key, 0, -1)
+        raw_msgs = await self.redis.lrange(key, 0, -1)
         return [ChatMessage(**json.loads(msg)) for msg in raw_msgs]
 
     async def load_messages(self, session_id: str, messages: List[ChatMessage]) -> None:
@@ -41,7 +41,7 @@ class RedisHotContext(RedisRepository, HotContextRepository):
             return
         key = self._get_key(session_id)
         serialized = self._serialize(messages)
-        async with self._redis.pipeline(transaction=True) as pipe:
+        async with self.redis.pipeline(transaction=True) as pipe:
             await pipe.delete(key)
             await pipe.rpush(key, *serialized)
             await pipe.expire(key, self.ttl)

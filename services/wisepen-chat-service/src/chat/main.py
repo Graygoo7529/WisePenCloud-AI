@@ -36,7 +36,7 @@ from chat.api.endpoints import memory as memory_endpoints
 from chat.api.endpoints import model as model_endpoints
 from chat.api.endpoints import speech as speech_endpoints
 from chat.api.endpoints import tool as tool_endpoints
-from chat.domain.entities import ChatSession, ChatMessage, Provider, Model, ModelProviderMapping, UserToolConfig, UserMcpServerConfig
+from chat.domain.entities import ChatSession, ChatMessage, Provider, Model, ModelProviderMapping, UserToolConfig, UserMcpServerConfig, SuspendedChat
 
 
 # 避免 HTTP 代理拦截内部中间件请求。
@@ -107,10 +107,6 @@ async def lifespan(app: FastAPI):
         await container.service_discovery().close()
     except Exception as e:
         error("service discovery close failed.", exc=e)
-    try:
-        await container.redis_client().aclose()
-    except Exception as e:
-        error("redis client close failed.", exc=e)
     try:
         await nacos_client_manager.deregister_instance()
     except Exception as e:
