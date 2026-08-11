@@ -36,13 +36,14 @@ from chat.api.endpoints import memory as memory_endpoints
 from chat.api.endpoints import model as model_endpoints
 from chat.api.endpoints import speech as speech_endpoints
 from chat.api.endpoints import tool as tool_endpoints
-from chat.domain.entities import ChatSession, ChatMessage, Provider, Model, ModelProviderMapping, UserToolConfig, UserMcpServerConfig, SuspendedChat
+from chat.domain.entities import ChatSession, ChatMessage, Provider, Model, ModelProviderMapping, UserToolConfig, UserMcpServerConfig
 
 
 # 避免 HTTP 代理拦截内部中间件请求。
 no_proxy = ",".join(filter(None, [
     os.environ.get("NO_PROXY") or os.environ.get("no_proxy") or "",
-    "localhost, 127.0.0.1"
+    "localhost, 127.0.0.1",
+    settings.QDRANT_HOST,
 ]))
 os.environ["no_proxy"] = no_proxy
 os.environ["NO_PROXY"] = no_proxy
@@ -106,7 +107,10 @@ async def lifespan(app: FastAPI):
         await container.service_discovery().close()
     except Exception as e:
         error("service discovery close failed.", exc=e)
-
+    try:
+        await container.redis_client().aclose()
+    except Exception as e:
+        error("redis client close failed.", exc=e)
     try:
         await nacos_client_manager.deregister_instance()
     except Exception as e:

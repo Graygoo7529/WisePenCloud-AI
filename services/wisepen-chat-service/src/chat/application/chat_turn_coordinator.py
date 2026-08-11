@@ -29,6 +29,7 @@ from chat.api.vercel_sse_mapper import to_vercel_sse
 from chat.application.chat_turn_finalizer import ChatTurnFinalizer
 from chat.application.tools.skill_tools.utils.skill_matcher import SkillMatcher
 from chat.application.tools.core import ToolRegistry
+from chat.application.tools.core.execution.dispatcher import ToolDispatcher
 from chat.application.tools.client_tools import ClientToolCapability
 from chat.application.tools.core.definition import ClientToolResult, ToolApprovalStatus
 from common.kafka.producer import KafkaProducerClient
@@ -71,6 +72,7 @@ class ChatTurnCoordinator:
             hot_context_repo: HotContextRepository,
             suspended_chat_repo: SuspendedChatRepository,
             tool_registry: ToolRegistry,
+            tool_dispatcher: ToolDispatcher,
             kafka_producer: KafkaProducerClient,
             skill_matcher: SkillMatcher,
             agent_resolver: AgentResolver | None = None,
@@ -85,6 +87,7 @@ class ChatTurnCoordinator:
         self._query_loop_runtime = QueryLoopRuntime(
             llm_provider_resolver=llm_provider_resolver,
             token_counter=token_counter,
+            tool_dispatcher=tool_dispatcher,
         )
         self._turn_finalizer = ChatTurnFinalizer(
             text_llm=text_llm,
