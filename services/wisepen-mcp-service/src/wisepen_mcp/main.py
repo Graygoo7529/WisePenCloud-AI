@@ -33,6 +33,10 @@ os.environ["NO_PROXY"] = no_proxy
 
 
 mcp_server = build_skill_creator_mcp(container.ai_asset_client())
+mcp_server = build_mcp_server(
+    ai_asset_client=container.ai_asset_client(),
+    web_search_service=container.web_search_service(),
+)
 mcp_app = mcp_server.streamable_http_app()
 
 
@@ -53,6 +57,10 @@ async def lifespan(app: FastAPI):
             await container.rpc_client().aclose()
         except Exception as e:
             error("rpc client close failed.", exc=e)
+        try:
+            await container.web_search_http_client().aclose()
+        except Exception as e:
+            error("web search http client close failed.", exc=e)
         try:
             await container.service_discovery().close()
         except Exception as e:

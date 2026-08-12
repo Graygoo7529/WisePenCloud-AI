@@ -33,6 +33,33 @@ class Container(containers.DeclarativeContainer):
         AIAssetClient,
         rpc=rpc_client,
     )
+    web_search_http_client = providers.Singleton(
+        httpx.AsyncClient,
+        timeout=httpx.Timeout(settings.WEB_SEARCH_HTTP_TIMEOUT_SECONDS),
+    )
+    platform_default_searcher = providers.Singleton(
+        _build_platform_default_searcher,
+        http_client=web_search_http_client,
+    )
+    web_search_source_factory = providers.Singleton(
+        SearchSourceFactory,
+        http_client=web_search_http_client,
+        platform_default_searcher=platform_default_searcher,
+        exa_base_url=settings.WEB_SEARCH_EXA_BASE_URL,
+        tavily_base_url=settings.WEB_SEARCH_TAVILY_BASE_URL,
+        anysearch_base_url=settings.WEB_SEARCH_ANYSEARCH_BASE_URL,
+        baidu_qianfan_base_url=settings.WEB_SEARCH_BAIDU_QIANFAN_BASE_URL,
+        tinyfish_base_url=settings.WEB_SEARCH_TINYFISH_BASE_URL,
+        firecrawl_base_url=settings.WEB_SEARCH_FIRECRAWL_BASE_URL,
+    )
+    web_search_pipeline = providers.Singleton(
+        SearchPipeline,
+    )
+    web_search_service = providers.Singleton(
+        WebSearchService,
+        search_pipeline=web_search_pipeline,
+        source_factory=web_search_source_factory,
+    )
 
 
 container = Container()
