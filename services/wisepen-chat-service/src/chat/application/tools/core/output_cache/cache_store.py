@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import uuid
 
-from chat.application.utils.chunkers import (
+from common.utils.chunkers import (
     Chunk,
     ChunkDocument,
     MarkdownChunker,

@@ -5,7 +5,7 @@
 ## 公开入口
 
 ```python
-from chat.application.utils.chunkers import ChunkDocument, MarkdownChunker, PlainTextChunker
+from common.utils.chunkers import ChunkDocument, MarkdownChunker, PlainTextChunker
 
 markdown_result = MarkdownChunker(max_characters=6000).chunk(
     document=ChunkDocument(text=markdown, content_type="text/markdown")

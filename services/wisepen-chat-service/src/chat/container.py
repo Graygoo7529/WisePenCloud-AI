@@ -55,7 +55,6 @@ from chat.application.tools.session_tools.tool_content_tools import (
     ToolContentRegexSearchTool,
     ToolContentSemanticSearchTool,
 )
-from chat.application.utils.ranking.presets import build_tool_content_semantic_search_pipeline
 from chat.core.config.nacos import nacos_client_manager
 from chat.service_client import FileStorageClient, AIAssetClient, McpServiceClient, ResourceClient
 from common.cloud.service_discovery import ServiceDiscovery
@@ -232,9 +231,6 @@ class Container(containers.DeclarativeContainer):
         resource_client=resource_client,
         file_loader=oss_file_loader,
     )
-    tool_content_ranking_pipeline = providers.Singleton(
-        build_tool_content_semantic_search_pipeline,
-    )
     tool_content_get_structure_tool = providers.Singleton(
         ToolContentGetStructureTool,
         store=tool_content_store,
@@ -258,7 +254,6 @@ class Container(containers.DeclarativeContainer):
     tool_content_semantic_search_tool = providers.Singleton(
         ToolContentSemanticSearchTool,
         store=tool_content_store,
-        ranking_pipeline=tool_content_ranking_pipeline,
     )
     tool_providers = providers.List(
         search_history_tool,

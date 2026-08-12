@@ -4,6 +4,8 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
+from zeroentropy import AsyncZeroEntropy
+
 from chat.application.tools.core import (
     ToolDefinition,
     ToolExecutionError,
@@ -17,11 +19,15 @@ from chat.application.tools.core.output_cache.cache_store import (
     ToolContentChunk,
     ToolContentStore,
 )
-from chat.application.utils.ranking import RankCandidate, RankQuery, RankRequest
-from chat.application.utils.ranking.pipeline import RankingPipeline
 from chat.core.config.app_settings import settings
 
 from chat.application.tools.session_tools.tool_content_tools.window import ToolContentWindow, ToolContentWindowBuilder
+from common.utils.ranking import RankCandidate, RankQuery, RankRequest
+from common.utils.ranking import RankingPipeline
+from common.utils.ranking.fusion import WeightedRrfFusion
+from common.utils.ranking.rerankers import ZeroEntropyReranker, ZeroEntropyRerankerConfig
+from common.utils.ranking.scorers import BM25Scorer, FieldedBM25Scorer, FieldedBM25ScorerConfig
+from common.utils.ranking.tokenizer import ThuLacRankingTokenizer
 
 _TIMEOUT_SECONDS = 300.0
 _PARAMETERS_SCHEMA: dict[str, Any] = {
@@ -65,6 +71,24 @@ class ToolContentSemanticSearchResult:
     results: list[ToolContentSemanticSearchItem] = field(default_factory=list)
     budget_exhausted: bool = False
 
+def build_tool_content_semantic_search_pipeline() -> RankingPipeline:
+    tokenizer = ThuLacRankingTokenizer()
+    return RankingPipeline(
+        scorers=(
+            BM25Scorer(tokenizer=tokenizer),
+            FieldedBM25Scorer(
+                tokenizer=tokenizer,
+                config=FieldedBM25ScorerConfig(
+                    field_weights={"section": 2.0, "anchor": 1.5},
+                ),
+            ),
+        ),
+        fusion=WeightedRrfFusion(),
+        reranker=ZeroEntropyReranker(
+            client=AsyncZeroEntropy(api_key=settings.ZERO_ENTROPY_API_KEY),
+            config=ZeroEntropyRerankerConfig(model=settings.RERANKER_MODEL),
+        ),
+    )
 
 class ToolContentSemanticSearchTool:
     __slots__ = ("_definition", "_ranking_pipeline", "_store")
@@ -73,10 +97,9 @@ class ToolContentSemanticSearchTool:
         self,
         *,
         store: ToolContentStore,
-        ranking_pipeline: RankingPipeline,
     ) -> None:
         self._store = store
-        self._ranking_pipeline = ranking_pipeline
+        self._ranking_pipeline = build_tool_content_semantic_search_pipeline(),
         self._definition = ToolDefinition(
             llm_spec=ToolLLMSpec(
                 name="tool_content_semantic_search",

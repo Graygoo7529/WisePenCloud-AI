@@ -7,7 +7,7 @@ from chat.application.tools.core.output_cache.cache_store import (
     StoredToolContent,
     ToolContentChunk,
 )
-from chat.application.utils.chunkers import SourceSpan, TextLocator
+from common.utils.chunkers import SourceSpan, TextLocator
 
 
 @dataclass(slots=True)

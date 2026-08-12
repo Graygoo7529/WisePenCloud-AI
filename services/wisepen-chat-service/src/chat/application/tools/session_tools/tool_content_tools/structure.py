@@ -13,7 +13,7 @@ from chat.application.tools.core import (
     ToolRiskLevel,
 )
 from chat.application.tools.core.output_cache.cache_store import ToolContentStore
-from chat.application.utils.chunkers import LocatorKind, TextLocator
+from common.utils.chunkers import LocatorKind, TextLocator
 
 _TIMEOUT_SECONDS = 300.0
 _PARAMETERS_SCHEMA: dict[str, Any] = {

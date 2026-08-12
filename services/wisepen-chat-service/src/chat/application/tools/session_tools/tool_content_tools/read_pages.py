@@ -16,7 +16,7 @@ from chat.application.tools.core.output_cache.cache_store import (
     StoredToolContent,
     ToolContentStore,
 )
-from chat.application.utils.chunkers import LocatorKind, TextLocator
+from common.utils.chunkers import LocatorKind, TextLocator
 from chat.core.config.app_settings import settings
 
 from chat.application.tools.session_tools.tool_content_tools.window import ToolContentWindow, ToolContentWindowBuilder
