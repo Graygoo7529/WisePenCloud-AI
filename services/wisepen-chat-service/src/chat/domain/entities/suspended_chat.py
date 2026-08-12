@@ -27,6 +27,12 @@ class SuspendedTurnContext:
     turn_suspension: TurnSuspension
 
 
+def _encode_context(value: SuspendedTurnContext) -> str:
+    return base64.b64encode(
+        pickle.dumps(value, protocol=pickle.HIGHEST_PROTOCOL)
+    ).decode("ascii")
+
+
 class SuspendedChat(Document):
     """未完成 Chat Turn 的临时恢复缓存"""
     session_id: str
@@ -46,10 +52,12 @@ class SuspendedChat(Document):
 
     @field_serializer("context")
     def encode_context(self, value: SuspendedTurnContext):
-        return base64.b64encode(pickle.dumps(value, protocol=pickle.HIGHEST_PROTOCOL)).decode("ascii")
+        return _encode_context(value)
 
     class Settings:
         name = "wisepen_suspended_chat"
+        # Beanie 的 Document BSON 编码不会调用 Pydantic field_serializer。
+        bson_encoders = {SuspendedTurnContext: _encode_context}
         indexes = [
             IndexModel([
                 ("session_id", ASCENDING),

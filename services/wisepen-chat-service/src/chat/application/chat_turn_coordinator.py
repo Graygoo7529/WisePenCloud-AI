@@ -24,7 +24,7 @@ from chat.application.agents import (
     AgentResolver,
     DefaultAgentResolver, AgentSpec,
 )
-from chat.application.events import StepFinishEvent, ErrorEvent
+from chat.application.events import ErrorEvent, StepFinishEvent, TurnSuspension
 from chat.api.vercel_sse_mapper import to_vercel_sse
 from chat.application.chat_turn_finalizer import ChatTurnFinalizer
 from chat.application.tools.skill_tools.utils.skill_matcher import SkillMatcher
@@ -112,6 +112,7 @@ class ChatTurnCoordinator:
         if suspended_chat is None:
             raise ServiceException(ChatErrorCode.SUSPENDED_CHAT_NOT_FOUND)
         suspended_chat_id = str(suspended_chat.id)
+        turn_suspension = suspended_chat.context.turn_suspension
         tool_scope = await self._tool_registry.recover_derived(suspended_chat.context.tool_scope_data, user_id)
 
         chat_turn_context = ChatTurnContext(
@@ -122,20 +123,37 @@ class ChatTurnCoordinator:
             session_summary=suspended_chat.context.session_summary,
             windowed_history_messages=suspended_chat.context.windowed_history_messages,
             tool_scope=tool_scope,
-            messages_for_llm=suspended_chat.context.messages_for_llm,
-            chat_record_messages=suspended_chat.context.chat_record_messages,
-            token_usage=suspended_chat.context.token_usage
+            messages_for_llm=list(suspended_chat.context.messages_for_llm),
+            # 首次挂起批次已经落库和计费；恢复批次只记录新增的工具结果和后续回复。
+            chat_record_messages=[],
+            token_usage=0,
         )
 
         async for event in self.query_llm(
             chat_turn_context=chat_turn_context,
             client_tool_results=client_tool_results,
             tool_approval_status=tool_approval_status,
+            resumed_turn_suspension=turn_suspension,
             cancel_requested=cancel_requested,
         ):
             yield event
-        self.set_background_task(background_tasks, chat_turn_context)
-
+        # 恢复在执行保存的工具计划前被取消时不会产生新增消息；此时必须保留挂起记录，
+        # 否则下一轮历史只剩 assistant function_call，缺少对应的 Role.TOOL。
+        if not chat_turn_context.chat_record_messages:
+            return
+        # 恢复批次必须先完成消息持久化，再删除挂起记录；否则后台任务失败时，
+        # assistant function_call 可能已经随挂起记录一起丢失对应的 Role.TOOL 结果，
+        # 下一轮回放会把不完整的工具调用历史提交给 provider。
+        await self._turn_finalizer.persist_message_and_token_bill(
+            user_id=chat_turn_context.user_id,
+            session_id=chat_turn_context.session_id,
+            chat_record_messages=chat_turn_context.chat_record_messages,
+            memory_policy=chat_turn_context.agent_spec.memory_policy,
+            model_info=chat_turn_context.model_info,
+            token_usage=chat_turn_context.token_usage,
+            billing_group_id=chat_turn_context.agent_spec.billing_group_id,
+        )
+        # 只有上面的持久化成功后才删除挂起记录，失败时保留它以便重试或由下一轮关闭。
         await self._suspended_chat_repo.delete_by_id(suspended_chat_id)
 
     # -------------------------------------------------------------------------
@@ -331,6 +349,7 @@ class ChatTurnCoordinator:
             chat_turn_context: ChatTurnContext,
             client_tool_results: list[ClientToolResult] | None,
             tool_approval_status: List[ToolApprovalStatus] | None,
+            resumed_turn_suspension: TurnSuspension | None = None,
             cancel_requested: Callable[[], Awaitable[bool]] | None = None,
     ):
         # 流式推理
@@ -343,6 +362,7 @@ class ChatTurnCoordinator:
                 model_info=chat_turn_context.model_info,
                 client_tool_results=client_tool_results,
                 tool_approval_status=tool_approval_status,
+                resumed_turn_suspension=resumed_turn_suspension,
                 cancel_requested=cancel_requested,
             ):
                 # QueryLoopRuntime 产出的事件如果是 StepFinishEvent 额外处理消息累积
@@ -383,6 +403,8 @@ class ChatTurnCoordinator:
                     return
         except ServiceException as e:
             error("chat stream generation failed.", session_id=chat_turn_context.session_id, exc=e)
+            if resumed_turn_suspension is not None and not chat_turn_context.chat_record_messages:
+                raise
             yield to_vercel_sse(ErrorEvent(error_text=str(e)))
             return
 
@@ -442,8 +464,11 @@ class ChatTurnCoordinator:
             for invocation in unfinished_chat.context.turn_suspension.classified_tool_invocation_plan.server_tools
         )
 
+        # 首次挂起批次的 user/assistant（含 function_call）已经落库；这里只构造
+        # 本次关闭新增的工具结果和结束 assistant，避免下一轮历史出现重复消息/重复计费。
+        close_messages = []
         for invocation, message in pending_messages:
-            unfinished_chat.context.chat_record_messages.append(
+            close_messages.append(
                 ChatMessage(
                     session_id=session_id, role=Role.TOOL,
                     tool_call_id=invocation.tool_call_id, tool_name=invocation.tool_name,
@@ -451,7 +476,7 @@ class ChatTurnCoordinator:
                 )
             )
 
-        unfinished_chat.context.chat_record_messages.append(
+        close_messages.append(
             ChatMessage(
                 session_id=session_id, role=Role.ASSISTANT,
                 content="本轮对话已中断，未能生成完整回复",
@@ -462,10 +487,11 @@ class ChatTurnCoordinator:
         await self._turn_finalizer.persist_message_and_token_bill(
             user_id=unfinished_chat.user_id,
             session_id=unfinished_chat.session_id,
-            chat_record_messages=unfinished_chat.context.chat_record_messages,
+            chat_record_messages=close_messages,
             memory_policy=unfinished_chat.context.agent_spec.memory_policy,
             model_info=unfinished_chat.context.model_info,
-            token_usage=unfinished_chat.context.token_usage,
+            # 原始模型调用已在首次挂起批次计费，关闭动作只补写状态消息，不应重复计费。
+            token_usage=0,
             billing_group_id=unfinished_chat.context.agent_spec.billing_group_id,
         )
         # 调用轻量级模型生成并更新会话的全局摘要
@@ -473,10 +499,12 @@ class ChatTurnCoordinator:
                 and unfinished_chat.context.agent_spec.memory_policy.enable_chat_memory_summary
                 and unfinished_chat.context.windowed_history_messages is not None
                 and unfinished_chat.context.windowed_history_messages.needs_compression):
+            # 摘要输入可以包含首次挂起批次的完整上下文，但正式持久化仍只写 close_messages，
+            # 这样既不遗漏当前用户问题，又不会重复落库 user/assistant/function_call。
             await self._turn_finalizer.summarize_and_compress(
                 session_id=unfinished_chat.session_id,
                 windowed_history_messages=unfinished_chat.context.windowed_history_messages,
-                chat_record_messages=unfinished_chat.context.chat_record_messages,
+                chat_record_messages=[*unfinished_chat.context.chat_record_messages, *close_messages],
                 existing_summary=unfinished_chat.context.session_summary,
                 memory_policy=unfinished_chat.context.agent_spec.memory_policy,
             )

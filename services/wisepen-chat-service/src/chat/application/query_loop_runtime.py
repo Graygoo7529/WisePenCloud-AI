@@ -27,7 +27,11 @@ from chat.application.tools.core.definition import ClientToolResult, ToolApprova
 from chat.application.tools import ToolScope
 from chat.application.tools.core.execution.dispatcher import ToolDispatcher
 from chat.application.tools.core.execution.result import ToolExecutionResult
-from chat.application.tools.core.llm.invocation import ToolInvocation, classify_tools
+from chat.application.tools.core.llm.invocation import (
+    ClassifiedToolInvocationPlan,
+    ToolInvocation,
+    classify_tools,
+)
 from chat.application.tools.core.llm.renderer import tool_result_renderer
 from chat.core.config.app_settings import settings
 from chat.domain.entities import ChatMessage, Role
@@ -154,6 +158,7 @@ class QueryLoopRuntime:
         start_iteration: int = 0,
         client_tool_results: list[ClientToolResult] = None,
         tool_approval_status: List[ToolApprovalStatus] = None,
+        resumed_turn_suspension: TurnSuspension | None = None,
         cancel_requested: Callable[[], Awaitable[bool]] | None = None,
     ) -> AsyncIterator[StreamEvent]:
         # 解析获取当前模型的 LLMProvider
@@ -173,8 +178,15 @@ class QueryLoopRuntime:
         # 进入多轮循环
         _client_tool_results = client_tool_results
         _tool_approval_status = tool_approval_status
+        _resumed_tool_invocation_plan = (
+            resumed_turn_suspension.classified_tool_invocation_plan
+            if resumed_turn_suspension is not None
+            else None
+        )
 
         max_iterations = agent_max_iterations or settings.AGENT_MAX_ITERATIONS
+        if resumed_turn_suspension is not None:
+            start_iteration = resumed_turn_suspension.iteration
         for iteration in range(start_iteration, max_iterations):
             # 请求取消检查点
             if cancel_requested is not None and await cancel_requested():
@@ -193,6 +205,7 @@ class QueryLoopRuntime:
                 tool_scope=tool_scope,
                 client_tool_results=_client_tool_results,
                 tool_approval_status=_tool_approval_status,
+                resumed_tool_invocation_plan=_resumed_tool_invocation_plan,
                 cancel_requested=cancel_requested,
             ):
                 # 如果拿到的是 StepFinishEvent 就存到 step_finish_event；否则直接 yield
@@ -203,6 +216,7 @@ class QueryLoopRuntime:
             # 清空客户端工具调用结果和工具批准状态，以推进正常循环
             _client_tool_results = None
             _tool_approval_status = None
+            _resumed_tool_invocation_plan = None
 
             assert step_finish_event is not None
             if step_finish_event.aborted:
@@ -235,10 +249,30 @@ class QueryLoopRuntime:
         tool_scope: ToolScope,
         client_tool_results: list[ClientToolResult] | None = None,
         tool_approval_status: List[ToolApprovalStatus] | None = None,
+        resumed_tool_invocation_plan: ClassifiedToolInvocationPlan | None = None,
         cancel_requested: Callable[[], Awaitable[bool]] | None = None,
     ) -> AsyncIterator[Union[StreamEvent, StepFinishEvent]]:
         # 发 step 开始事件
         yield StepStartEvent()
+
+        # 恢复不是一次新的模型推理。assistant 工具调用消息已在挂起前写入 messages，
+        # 此处只消费持久化的调用计划并补齐 Role.TOOL 消息。
+        if resumed_tool_invocation_plan is not None:
+            async for event in self._run_resumed_tool_step(
+                session_id=session_id,
+                tool_scope=tool_scope,
+                tool_invocation_plan=resumed_tool_invocation_plan,
+                client_tool_results=client_tool_results or [],
+                tool_approval_status=tool_approval_status or [],
+                cancel_requested=cancel_requested,
+            ):
+                yield event
+            return
+        if client_tool_results is not None or tool_approval_status is not None:
+            raise ServiceException(
+                ChatErrorCode.SUSPENDED_CHAT_STATE_INVALID,
+                custom_msg="恢复工具结果时缺少挂起工具计划",
+            )
 
         # 创建本轮推理的事件解释器
         event_interpreter = _StepEventInterpreter()
@@ -475,6 +509,106 @@ class QueryLoopRuntime:
                 aborted=True,
             )
             return
+
+    async def _run_resumed_tool_step(
+        self,
+        *,
+        session_id: str,
+        tool_scope: ToolScope,
+        tool_invocation_plan: ClassifiedToolInvocationPlan,
+        client_tool_results: list[ClientToolResult],
+        tool_approval_status: list[ToolApprovalStatus],
+        cancel_requested: Callable[[], Awaitable[bool]] | None,
+    ) -> AsyncIterator[Union[StreamEvent, StepFinishEvent]]:
+        """完成挂起 step 的工具阶段，不重复创建已持久化的 assistant 消息。"""
+        new_messages: list[ChatMessage] = []
+        tool_outputs: list[ToolExecutionResult] = []
+        invocations = [
+            *tool_invocation_plan.server_tools,
+            *tool_invocation_plan.approval_required_tools,
+            *tool_invocation_plan.client_tools,
+        ]
+
+        try:
+            if cancel_requested is not None and await cancel_requested():
+                raise asyncio.CancelledError
+
+            approval_by_call_id = {
+                status.tool_call_id: status.approved
+                for status in tool_approval_status
+            }
+            for invocation in tool_invocation_plan.approval_required_tools:
+                invocation.is_approved = approval_by_call_id[invocation.tool_call_id]
+
+            # 首次 step 因外部动作整体挂起，混合计划中的 server tools 尚未执行，
+            # 因此恢复时必须完成三类工具。
+            if tool_invocation_plan.server_tools:
+                output = await self._tool_dispatcher.dispatch(
+                    tool_invocation_plan.server_tools,
+                    tool_scope,
+                )
+                tool_outputs.extend(output.results)
+
+            if tool_invocation_plan.approval_required_tools:
+                if cancel_requested is not None and await cancel_requested():
+                    raise asyncio.CancelledError
+                output = await self._tool_dispatcher.dispatch(
+                    tool_invocation_plan.approval_required_tools,
+                    tool_scope,
+                )
+                tool_outputs.extend(output.results)
+
+            if tool_invocation_plan.client_tools:
+                if cancel_requested is not None and await cancel_requested():
+                    raise asyncio.CancelledError
+                output = await self._tool_dispatcher.client_dispatch(
+                    tool_invocation_plan.client_tools,
+                    client_tool_results,
+                    tool_scope,
+                )
+                tool_outputs.extend(output.results)
+
+            for result in tool_outputs:
+                tool = tool_scope.get(result.tool_invocation.tool_name)
+                rendered = tool_result_renderer(result, tool.definition if tool else None)
+                tool_message_content = rendered.tool_output
+                if not isinstance(tool_message_content, str):
+                    tool_message_content = (
+                        ""
+                        if tool_message_content is None
+                        else json.dumps(tool_message_content, ensure_ascii=False, default=str)
+                    )
+
+                yield ToolOutputAvailableEvent(
+                    call_id=rendered.tool_call_id,
+                    output=rendered.tool_output,
+                )
+                new_messages.append(
+                    ChatMessage(
+                        session_id=session_id,
+                        role=Role.TOOL,
+                        tool_call_id=rendered.tool_call_id,
+                        tool_name=rendered.tool_name,
+                        content=tool_message_content,
+                        persisted_output_placeholder=rendered.persisted_output_placeholder,
+                    )
+                )
+
+            yield StepFinishEvent(
+                is_finished=False,
+                intermediate_messages=new_messages,
+                token_usage=0,
+            )
+        except asyncio.CancelledError:
+            yield StepFinishEvent(
+                is_finished=False,
+                intermediate_messages=self._build_aborted_tool_messages(
+                    session_id=session_id,
+                    invocations=invocations,
+                ),
+                token_usage=0,
+                aborted=True,
+            )
 
     def _build_aborted_tool_messages(
         self,
