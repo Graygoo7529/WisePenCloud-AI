@@ -4,9 +4,9 @@ import asyncio
 
 from chat.application.tools.core.definition import ClientToolResult
 from chat.application.tools.core.execution.executor import ToolExecutor
+from chat.application.tools.core.execution.result import ToolExecutionResult
 from chat.application.tools.core.llm.invocation import ToolInvocation
 from chat.application.tools.core.output_cache.cache_manager import ToolOutputCache
-from chat.application.tools.core.llm.renderer import RenderToolResult
 from chat.application.tools.core.registry import ToolScope
 
 
@@ -18,7 +18,7 @@ class ToolDispatcher:
         self,
         invocations: list[ToolInvocation],
         tool_scope: ToolScope,
-    ) -> list[RenderToolResult]:
+    ) -> list[ToolExecutionResult]:
         executor = ToolExecutor(tool_scope, output_cache=self._output_cache)
         results = await asyncio.gather(
             *[executor.execute_one(invocation) for invocation in invocations],
@@ -31,7 +31,7 @@ class ToolDispatcher:
         invocations: list[ToolInvocation],
         client_tool_results: list[ClientToolResult],
         tool_scope: ToolScope,
-    ) -> list[RenderToolResult]:
+    ) -> list[ToolExecutionResult]:
         executor = ToolExecutor(tool_scope, output_cache=self._output_cache)
 
         result_map = {

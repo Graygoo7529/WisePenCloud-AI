@@ -31,7 +31,7 @@ class TemporaryAttachmentRefResponse(BaseModel):
     def from_entity(cls, ref: TemporaryAttachmentRef) -> "TemporaryAttachmentRefResponse":
         return cls(
             attachment_id=ref.attachment_id,
-            attachment_type=ref.attachment_type,
+            attachment_type="temporary",
             attachment_name=ref.attachment_name,
             object_key=ref.object_key,
             extension=ref.extension,
@@ -51,7 +51,7 @@ class ResourceAttachmentRefResponse(BaseModel):
     def from_entity(cls, ref: ResourceAttachmentRef) -> "ResourceAttachmentRefResponse":
         return cls(
             attachment_id=ref.attachment_id,
-            attachment_type=ref.attachment_type,
+            attachment_type="resource",
             attachment_name=ref.attachment_name,
             resource_id=ref.resource_id,
             resource_type=ref.resource_type,

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from chat.application.tools.common.tool_content_store import StoredToolContent
+from chat.application.tools.core.output_cache.cache_store import StoredToolContent
+from chat.core.config.app_settings import settings
 from chat.core.persistence.redis.base import RedisRepository
 from chat.domain.repositories import ToolContentRepository
 from pydantic import TypeAdapter
@@ -16,8 +17,19 @@ class RedisToolContentRepository(RedisRepository, ToolContentRepository):
 
     __slots__ = ("_ttl_seconds",)
 
-    def __init__(self, *, redis_client: Redis, ttl_seconds: int) -> None:
-        super().__init__(redis_client=redis_client)
+    def __init__(
+        self,
+        *,
+        ttl_seconds: int,
+        redis_client: Redis | None = None,
+    ) -> None:
+        super().__init__(
+            redis_client=(
+                redis_client
+                if redis_client is not None
+                else Redis.from_url(settings.REDIS_URL, decode_responses=False)
+            )
+        )
         self._ttl_seconds = ttl_seconds
 
     async def put(self, stored: StoredToolContent) -> None:

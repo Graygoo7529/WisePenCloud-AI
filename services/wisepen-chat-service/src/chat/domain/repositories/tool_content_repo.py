@@ -4,7 +4,7 @@ from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from chat.application.tools.common.tool_content_store.models import StoredToolContent
+    from chat.application.tools.core.output_cache.cache_store import StoredToolContent
 
 
 class ToolContentRepository(ABC):
