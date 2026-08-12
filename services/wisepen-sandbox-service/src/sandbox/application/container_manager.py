@@ -20,9 +20,6 @@ class ContainerManager:
 
     _PORT_MAPPING_PATTERN = re.compile(r"^(?P<container_port>\d+)/(?P<protocol>tcp|udp)\s+->\s+(?P<binding>.+)$")
 
-    def __init__(self, endpoint_host: str = "127.0.0.1") -> None:
-        self._endpoint_host = endpoint_host
-
     async def create(self, sandbox_img: str) -> str:
         """创建并启动容器，返回容器 ID。"""
         returncode, stdout, stderr = await self._docker("run", "-d", "-i", "-t", "-P", sandbox_img)
@@ -66,10 +63,19 @@ class ContainerManager:
             host_ports.add(host_port)
 
         concrete_hosts = binding_hosts - {"0.0.0.0", "[::]"}
-        if len(host_ports) != 1 or len(concrete_hosts) > 1:
-            raise ServiceException(SandboxErrorCode.DOCKER_RUNTIME_FAILED,f"docker port did not return one unambiguous mapping: {container_id}")
+        if len(host_ports) != 1:
+            raise ServiceException(
+                SandboxErrorCode.DOCKER_RUNTIME_FAILED,
+                f"docker port returned multiple host ports for container {container_id}: {sorted(host_ports)}",
+            )
 
-        endpoint_host = concrete_hosts.pop() if concrete_hosts else self._endpoint_host
+        if len(concrete_hosts) > 1:
+            raise ServiceException(
+                SandboxErrorCode.DOCKER_RUNTIME_FAILED,
+                f"docker port returned multiple host bindings for container {container_id}: {sorted(concrete_hosts)}",
+            )
+
+        endpoint_host = concrete_hosts.pop() if concrete_hosts else "127.0.0.1"
         return f"http://{endpoint_host}:{host_ports.pop()}"
 
     async def _docker(self, *args: str) -> tuple[int, str, str]:

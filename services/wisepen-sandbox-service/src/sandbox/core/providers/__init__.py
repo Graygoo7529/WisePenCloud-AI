@@ -1,3 +1,6 @@
-from sandbox.core.providers.sandbox_provider import AIOAdapter
+from sandbox.core.providers.sandbox_provider import (
+    AIOAdapter,
+    SandboxProviderManager,
+)
 
-__all__ = ["AIOAdapter"]
+__all__ = ["AIOAdapter", "SandboxProviderManager"]

@@ -3,7 +3,8 @@ from __future__ import annotations
 from dependency_injector import containers, providers
 
 from sandbox.application import ContainerManager, Watcher
-from sandbox.core.providers import AIOAdapter
+from sandbox.core.config.app_settings import settings
+from sandbox.core.providers import AIOAdapter, SandboxProviderManager
 from sandbox.core.storage.mongo import (
     MongoSandboxRepository,
     MongoWorkspaceRepository,
@@ -25,19 +26,18 @@ class Container(containers.DeclarativeContainer):
     sandbox_repository = providers.Singleton(MongoSandboxRepository)
     workspace_repository = providers.Singleton(MongoWorkspaceRepository)
 
-    sandbox_provider = providers.Singleton(
-        AIOAdapter,
-        sandbox_image=config.SANDBOX_IMAGE,
-        health_timeout_seconds=config.SANDBOX_AIO_HEALTH_TIMEOUT_SECONDS,
+    sandbox_provider_manager = providers.Singleton(
+        SandboxProviderManager,
+        provider_classes=[AIOAdapter],
+        provider_settings=settings.SANDBOX_PROVIDERS,
     )
     container_manager = providers.Singleton(
-        ContainerManager,
-        endpoint_host=config.SANDBOX_DOCKER_ENDPOINT_HOST,
+        ContainerManager
     )
     watcher = providers.Singleton(
         Watcher,
         sandbox_repository=sandbox_repository,
-        sandbox_provider=sandbox_provider,
+        sandbox_provider_manager=sandbox_provider_manager,
         container_manager=container_manager
     )
 

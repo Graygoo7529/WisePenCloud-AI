@@ -2,13 +2,14 @@ from __future__ import annotations
 
 import asyncio
 import threading
+from typing import Any
 
 import yaml
 from common.logger import error, info
 from pydantic import BaseModel, ConfigDict
 
-from sandbox.core.config.bootstrap_settings import bootstrap_settings
 from sandbox.core.config.nacos import nacos_client_manager
+from sandbox.domain.interfaces import SandboxProviderType
 
 
 class AppSettings(BaseModel):
@@ -28,21 +29,19 @@ class AppSettings(BaseModel):
     REDIS_URL: str
 
     # sandbox 池容量、warmup、销毁和重试配置。
-    SANDBOX_IMAGE: str
-    SANDBOX_PROVIDER_ID: str = "default"
-    SANDBOX_MAX_USER_BINDINGS: int = 20
+    SANDBOX_ACTIVE_PROVIDER_ID: SandboxProviderType
+    SANDBOX_PROVIDERS: dict[SandboxProviderType, dict[str, Any]]
     SANDBOX_TARGET_READY: int
-    SANDBOX_MIN_READY: int
-    SANDBOX_READY_RESERVE: int = 0
-    SANDBOX_MAX_CREATE_BATCH: int
+
+    # 预热超时时间
     SANDBOX_WARMUP_TIMEOUT_SECONDS: float
+    # 销毁超时时间
     SANDBOX_DESTROY_TIMEOUT_SECONDS: float
+    # 预热最大尝试次数
     SANDBOX_WARMUP_MAX_RETRIES: int
-    SANDBOX_WARMUP_RETRY_BACKOFF_SECONDS: float
-    SANDBOX_WARMUP_RETRY_MAX_BACKOFF_SECONDS: float
+
+    # 状态检查时间间隔
     SANDBOX_WATCHER_INTERVAL_SECONDS: float
-    SANDBOX_DOCKER_ENDPOINT_HOST: str = "127.0.0.1"
-    SANDBOX_AIO_HEALTH_TIMEOUT_SECONDS: float = 5.0
 
     # workspace 受管目录、快照缓存容量和后台淘汰配置。
     SANDBOX_WORKSPACE_ROOT: str = "./data/workspaces"
