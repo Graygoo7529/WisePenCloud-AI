@@ -1,23 +1,30 @@
-import asyncio
-from datetime import datetime, timezone
-from typing import Any
+from __future__ import annotations
 
-from chat.application.tools.core.definition import ClientToolResult
-from chat.application.tools.core import ToolRiskLevel
+import asyncio
+import json
+from dataclasses import is_dataclass, asdict
+from datetime import datetime, timezone
+from typing import Any, Mapping, Sequence
+
+from pydantic import BaseModel
+
+from chat.application.tools.core.definition import ClientToolResult, ToolRiskLevel
 from chat.application.tools.core.execution.hooks.builtin import JsonSchemaCheck, RequiredContextCheck
 from chat.application.tools.core.execution.result import (
+    ToolOutput,
     ToolExecutionError,
-    ToolExecutionImageOutput,
     ToolExecutionResult,
 )
 
 from chat.application.tools.core.llm.invocation import ToolInvocation
+from chat.application.tools.core.output_cache.cache_manager import ToolOutputCache
 from chat.application.tools.core.registry import ToolScope
 
 
 class ToolExecutor:
-    def __init__(self, tool_scope: ToolScope) -> None:
+    def __init__(self, tool_scope: ToolScope, *, output_cache: ToolOutputCache) -> None:
         self._tool_scope = tool_scope
+        self._output_cache = output_cache
 
     async def execute_client_one(self, invocation: ToolInvocation, client_tool_result: ClientToolResult) -> ToolExecutionResult:
         started_at = datetime.now(timezone.utc)
@@ -42,7 +49,14 @@ class ToolExecutor:
                     detail_reason=client_tool_result.output,
                     retryable=False,
                 )
-            return ToolExecutionResult(tool_invocation=invocation, tool_output=client_tool_result.output,
+
+            output = await self._output_cache.process(
+                tool_output=self._coerce_tool_output(client_tool_result.output),
+                invocation=invocation,
+                session_id=self._tool_scope.context["session_id"], # 会话 ID
+            )
+
+            return ToolExecutionResult(tool_invocation=invocation, tool_output=output,
                                        started_at=started_at, finished_at=datetime.now(timezone.utc),
                                        tool_execution_error=None)
 
@@ -88,20 +102,20 @@ class ToolExecutor:
 
             preflight_metadata = {}
             for preflight_hook in preflight_hooks:
-                output = await preflight_hook.check(
+                result = await preflight_hook.check(
                     invocation,
                     tool.definition.policy,
                     tool.definition.llm_spec.parameters_schema,
                     self._tool_scope.context,
                 )
-                if not output.ok:
+                if not result.ok:
                     raise ToolExecutionError(
                         reason="Tool Preflight Failed",
-                        detail_reason=output.message,
+                        detail_reason=result.message,
                         retryable=False,
                     )
                 else:
-                    preflight_metadata.update(output.metadata)
+                    preflight_metadata.update(result.metadata)
 
             output = await self._run(
                 tool.execute(
@@ -116,15 +130,15 @@ class ToolExecutor:
                 tool_name=invocation.tool_name,
             )
 
-            images = []
-            # 有视觉能力的工具需要返回 ToolExecutionImageOutput 对象
-            if isinstance(output, ToolExecutionImageOutput):
-                images = output.images
-                output = output.text
+            output = await self._output_cache.process(
+                tool_output=self._coerce_tool_output(output),
+                invocation=invocation,
+                session_id=self._tool_scope.context["session_id"], # 会话 ID
+            )
 
             return ToolExecutionResult(tool_invocation=invocation, tool_output=output,
                                        started_at=started_at, finished_at=datetime.now(timezone.utc),
-                                       tool_execution_error=None, images=images)
+                                       tool_execution_error=None)
         except ToolExecutionError as tool_execution_error:
             return ToolExecutionResult(tool_invocation=invocation, tool_output=None,
                                        started_at=started_at, finished_at=datetime.now(timezone.utc),
@@ -153,3 +167,38 @@ class ToolExecutor:
                 detail_reason=f"Tool '{tool_name}' timed out.",
                 retryable=False,
             ) from exc
+
+    @staticmethod
+    def _coerce_tool_output(output: Any) -> ToolOutput:
+        if isinstance(output, ToolOutput):
+            return output
+
+        if output is None:
+            return ToolOutput(content="")
+
+        if isinstance(output, str):
+            return ToolOutput(content=output)
+
+        if isinstance(output, bool):
+            return ToolOutput(content="true" if output else "false")
+
+        if isinstance(output, int | float):
+            return ToolOutput(content=str(output))
+
+        if isinstance(output, BaseModel):
+            return ToolOutput(content=output.model_dump_json())
+
+        if is_dataclass(output):
+            return ToolOutput(content=json.dumps(asdict(output), ensure_ascii=False))
+
+        if isinstance(output, Mapping):
+            return ToolOutput(content=json.dumps(dict(output), ensure_ascii=False))
+
+        if isinstance(output, Sequence) and not isinstance(output, str | bytes | bytearray):
+            return ToolOutput(content=json.dumps(list(output), ensure_ascii=False))
+
+        raise ToolExecutionError(
+            reason="Tool Output Invalid",
+            detail_reason=f"Tool output is not supported: {type(output).__qualname__}",
+            retryable=False,
+        )

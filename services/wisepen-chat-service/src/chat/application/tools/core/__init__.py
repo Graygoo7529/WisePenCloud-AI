@@ -30,9 +30,9 @@ from chat.application.tools.core.llm.renderer import (
 )
 
 from chat.application.tools.core.execution.result import (
-    ToolBatchResult,
+    CacheableText,
     ToolExecutionError,
-    ToolExecutionImageOutput,
+    ToolOutput,
     ToolExecutionResult,
 )
 
@@ -84,9 +84,9 @@ __all__ = [
     "tool_result_renderer",
 
     # execution result
-    "ToolBatchResult",
+    "CacheableText",
     "ToolExecutionError",
-    "ToolExecutionImageOutput",
+    "ToolOutput",
     "ToolExecutionResult",
 
     # execution

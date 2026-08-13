@@ -4,6 +4,7 @@ import time
 from typing import Any, List
 
 from chat.application.tools.core import (
+    ToolConfigSpec,
     ToolDefinition,
     ToolLLMSpec,
     ToolParametersSchema,
@@ -15,6 +16,31 @@ from chat.core.config.app_settings import settings
 from chat.domain.entities.mcp_tool_server_config import McpToolDescriptor
 from chat.service_client import McpServiceClient
 from common.logger import error
+
+_WEB_SEARCH_API_KEY_CONFIG = ToolConfigSpec(
+    schema={
+        "type": "object",
+        "properties": {
+            "api_key": {
+                "type": "string",
+                "title": "API Key",
+                "description": "API key for the configured search provider.",
+                "writeOnly": True,
+            },
+        },
+        "additionalProperties": False,
+    },
+    required_keys=("api_key",),
+    secret_keys=("api_key",),
+)
+
+_WEB_SEARCH_POLICY = ToolPolicy(
+    expose_by_default=True,
+    risk_level=ToolRiskLevel.LOW,
+    timeout_seconds=100.0,
+    persist_output=True,
+    max_output_chars=None,
+)
 
 _SYSTEM_TOOL_CONFIGS: List[dict[str, Any]] = [{
         "tool_name": "create_skill_info",
@@ -41,7 +67,7 @@ _SYSTEM_TOOL_CONFIGS: List[dict[str, Any]] = [{
         ),
         "failure_reason": "Skill Info Load Failed",
     }, {
-        "tool_name": "create_skill_info",
+        "tool_name": "update_skill_info",
         "policy": ToolPolicy(
             expose_by_default=False,
             risk_level=ToolRiskLevel.MEDIUM,
@@ -64,6 +90,42 @@ _SYSTEM_TOOL_CONFIGS: List[dict[str, Any]] = [{
             max_output_chars=settings.TOOL_RESULT_MAX_CHARS,
         ),
         "failure_reason": "Skill Draft Asset Upload Failed",
+    },
+    # Web Search Tools
+    {
+        "tool_name": "platform_search",
+        "policy": _WEB_SEARCH_POLICY,
+        "failure_reason": "Platform Search Failed",
+    },{
+        "tool_name": "exa_search",
+        "policy": _WEB_SEARCH_POLICY,
+        "config_spec": _WEB_SEARCH_API_KEY_CONFIG,
+        "failure_reason": "Exa Search Failed",
+    },{
+        "tool_name": "tavily_search",
+        "policy": _WEB_SEARCH_POLICY,
+        "config_spec": _WEB_SEARCH_API_KEY_CONFIG,
+        "failure_reason": "Tavily Search Failed",
+    },{
+        "tool_name": "anysearch_search",
+        "policy": _WEB_SEARCH_POLICY,
+        "config_spec": _WEB_SEARCH_API_KEY_CONFIG,
+        "failure_reason": "AnySearch Search Failed",
+    },{
+        "tool_name": "baidu_qianfan_search",
+        "policy": _WEB_SEARCH_POLICY,
+        "config_spec": _WEB_SEARCH_API_KEY_CONFIG,
+        "failure_reason": "Baidu Qianfan Search Failed",
+    },{
+        "tool_name": "tinyfish_search",
+        "policy": _WEB_SEARCH_POLICY,
+        "config_spec": _WEB_SEARCH_API_KEY_CONFIG,
+        "failure_reason": "TinyFish Search Failed",
+    },{
+        "tool_name": "firecrawl_search",
+        "policy": _WEB_SEARCH_POLICY,
+        "config_spec": _WEB_SEARCH_API_KEY_CONFIG,
+        "failure_reason": "Firecrawl Search Failed",
     }
 ]
 
@@ -112,6 +174,7 @@ class SystemMcpToolCatalog:
                         parameters_schema=parameters_schema,
                     ),
                     policy=overlay["policy"],
+                    config_spec=overlay.get("config_spec"),
                     preflight_hooks=(),
                 ),
                 failure_reason=overlay["failure_reason"],

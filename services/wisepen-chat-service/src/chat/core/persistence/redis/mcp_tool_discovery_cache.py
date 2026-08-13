@@ -15,7 +15,7 @@ class RedisMcpToolDiscoveryCache(McpToolDiscoveryCacheRepository):
 
     def _get_user_key(self, *, user_id: str, server_id: str, config_updated_at: datetime) -> str:
         if config_updated_at.tzinfo is None:
-            value = config_updated_at.replace(tzinfo=timezone.utc)
+            config_updated_at = config_updated_at.replace(tzinfo=timezone.utc)
         version = config_updated_at.astimezone(timezone.utc).isoformat(timespec="microseconds")
         return f"wisepen:chat:mcp_tools:{user_id}:{server_id}:{version}"
 
@@ -27,11 +27,11 @@ class RedisMcpToolDiscoveryCache(McpToolDiscoveryCacheRepository):
         return [McpToolDescriptor.model_validate(item) for item in payload]
 
     async def get_user_tools(
-        self,
-        *,
-        user_id: str,
-        server_id: str,
-        config_updated_at: datetime,
+            self,
+            *,
+            user_id: str,
+            server_id: str,
+            config_updated_at: datetime,
     ) -> list[McpToolDescriptor] | None:
         key = self._get_user_key(
             user_id=user_id,
@@ -48,13 +48,13 @@ class RedisMcpToolDiscoveryCache(McpToolDiscoveryCacheRepository):
             return None
 
     async def set_user_tools(
-        self,
-        *,
-        user_id: str,
-        server_id: str,
-        config_updated_at: datetime,
-        tools: list[McpToolDescriptor],
-        ttl_seconds: int,
+            self,
+            *,
+            user_id: str,
+            server_id: str,
+            config_updated_at: datetime,
+            tools: list[McpToolDescriptor],
+            ttl_seconds: int,
     ) -> None:
         key = self._get_user_key(
             user_id=user_id,

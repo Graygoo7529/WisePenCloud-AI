@@ -30,6 +30,7 @@ from chat.core.persistence import (
     RedisHotContext,
     RedisMcpToolDiscoveryCache,
     RedisChatTurnStream,
+    RedisToolContentRepository,
 )
 from chat.domain.repositories import ToolConfigRepository
 from chat.application.chat_turn_coordinator import ChatTurnCoordinator
@@ -41,9 +42,20 @@ from chat.application.tools.skill_tools.utils.skill_matcher import DefaultSkillM
 from chat.application.tools.skill_tools import LoadSkillAssetTool
 from chat.application.tools.skill_tools import LoadSkillTool
 from chat.application.tools.core import ToolRegistry
+from chat.application.tools.core.execution.dispatcher import ToolDispatcher
 from chat.application.tools.core.mcp import McpClient, McpToolCatalog, SystemMcpToolCatalog
+from chat.application.tools.core.output_cache.cache_manager import ToolOutputCache
+from chat.application.tools.core.output_cache.cache_store import ToolContentStore
 from chat.application.tools.session_tools.get_historical_chat_messages_tool import GetHistoricalChatMessagesTool
 from chat.application.tools.session_tools.load_image_attachment_tool import LoadImageAttachmentTool
+from chat.application.tools.session_tools.tool_content_tools import (
+    ToolContentGetStructureTool,
+    ToolContentReadPagesTool,
+    ToolContentReadRangeTool,
+    ToolContentReadSectionsTool,
+    ToolContentRegexSearchTool,
+    ToolContentSemanticSearchTool,
+)
 from chat.core.config.nacos import nacos_client_manager
 from chat.service_client import FileStorageClient, AIAssetClient, McpServiceClient, ResourceClient
 from common.cloud.service_discovery import ServiceDiscovery
@@ -111,6 +123,23 @@ class Container(containers.DeclarativeContainer):
     hot_context_repo = providers.Singleton(RedisHotContext)
     mcp_tool_discovery_cache_repo = providers.Singleton(RedisMcpToolDiscoveryCache)
     chat_turn_stream_repo = providers.Singleton(RedisChatTurnStream)
+    tool_content_repo = providers.Singleton(
+        RedisToolContentRepository,
+        ttl_seconds=settings.TOOL_CONTENT_DEFAULT_TTL_SECONDS,
+    )
+    tool_content_store = providers.Singleton(
+        ToolContentStore,
+        tool_content_repository=tool_content_repo,
+        max_chars=settings.TOOL_CONTENT_MAX_CHARS,
+    )
+    tool_output_cache = providers.Singleton(
+        ToolOutputCache,
+        tool_content_store=tool_content_store,
+    )
+    tool_dispatcher = providers.Singleton(
+        ToolDispatcher,
+        output_cache=tool_output_cache,
+    )
 
     # 内部 RPC：Nacos 服务发现 + 通用 httpx 客户端 + file-storage typed facade
     service_discovery = providers.Singleton(
@@ -207,11 +236,41 @@ class Container(containers.DeclarativeContainer):
         resource_client=resource_client,
         file_loader=oss_file_loader,
     )
+    tool_content_get_structure_tool = providers.Singleton(
+        ToolContentGetStructureTool,
+        store=tool_content_store,
+    )
+    tool_content_read_pages_tool = providers.Singleton(
+        ToolContentReadPagesTool,
+        store=tool_content_store,
+    )
+    tool_content_read_range_tool = providers.Singleton(
+        ToolContentReadRangeTool,
+        store=tool_content_store,
+    )
+    tool_content_read_sections_tool = providers.Singleton(
+        ToolContentReadSectionsTool,
+        store=tool_content_store,
+    )
+    tool_content_regex_search_tool = providers.Singleton(
+        ToolContentRegexSearchTool,
+        store=tool_content_store,
+    )
+    tool_content_semantic_search_tool = providers.Singleton(
+        ToolContentSemanticSearchTool,
+        store=tool_content_store,
+    )
     tool_providers = providers.List(
         search_history_tool,
         load_image_attachment_tool,
         load_skill_tool,
         load_skill_asset_tool,
+        tool_content_get_structure_tool,
+        tool_content_read_pages_tool,
+        tool_content_read_range_tool,
+        tool_content_read_sections_tool,
+        tool_content_regex_search_tool,
+        tool_content_semantic_search_tool,
     )
 
     tool_registry = providers.Singleton(
@@ -235,6 +294,7 @@ class Container(containers.DeclarativeContainer):
         message_repo=message_repo,
         hot_context_repo=hot_context_repo,
         tool_registry=tool_registry,
+        tool_dispatcher=tool_dispatcher,
         kafka_producer=kafka_producer,
         skill_matcher=skill_matcher,
         suspended_chat_repo=suspended_chat_repo,

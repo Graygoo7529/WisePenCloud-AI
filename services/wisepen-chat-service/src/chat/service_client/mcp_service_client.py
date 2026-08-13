@@ -6,6 +6,7 @@ from typing import Any, Mapping, Optional
 from httpx import AsyncClient
 from mcp import ClientSession
 from mcp.client.streamable_http import streamable_http_client
+from mcp.types import CallToolResult
 
 from chat.domain.entities.mcp_tool_server_config import McpToolDescriptor
 from common.cloud.service_discovery import LoadBalancingStrategy, ServiceDiscovery
@@ -16,6 +17,8 @@ from common.security.context import SecurityContextHolder
 
 _DEFAULT_SERVICE_NAME = "wisepen-mcp-service"
 _MCP_PATH = "/mcp/"
+WISEPEN_TOOL_CONFIG_META_KEY = "com.wisepen/tool_config"
+WISEPEN_TOOL_CONTEXT_META_KEY = "com.wisepen/tool_context"
 
 
 class McpServiceClient:
@@ -35,23 +38,25 @@ class McpServiceClient:
         self._strategy = default_strategy
 
     async def list_tools(self) -> list[McpToolDescriptor]:
-        async with streamable_http_client(
-            url=await self._resolve_url(),
-            http_client=AsyncClient(
-                headers=self._build_headers(),
-                timeout=self._timeout,
-            ),
-            terminate_on_close=True,
-        ) as (read_stream, write_stream, _):
-            async with ClientSession(read_stream, write_stream) as session:
-                await session.initialize()
-                result = await session.list_tools()
+        async with AsyncClient(
+            headers=self._build_headers(),
+            timeout=self._timeout,
+        ) as http_client:
+            async with streamable_http_client(
+                url=await self._resolve_url(),
+                http_client=http_client,
+                terminate_on_close=True,
+            ) as (read_stream, write_stream, _):
+                async with ClientSession(read_stream, write_stream) as session:
+                    await session.initialize()
+                    result = await session.list_tools()
 
         descriptors: list[McpToolDescriptor] = []
         for item in result.tools or []:
             name = item.name.strip()
             description = item.description
-            if not name or not description: continue
+            if not name or not description:
+                continue
             input_schema = item.inputSchema
             if hasattr(input_schema, "model_dump"):
                 input_schema = input_schema.model_dump(by_alias=True)
@@ -63,23 +68,34 @@ class McpServiceClient:
         server: Any,
         tool_name: str,
         arguments: Mapping[str, Any],
-    ) -> str:
-        async with streamable_http_client(
-            url=await self._resolve_url(),
-            http_client=AsyncClient(
-                headers=self._build_headers(),
-                timeout=self._timeout,
-            ),
-            terminate_on_close=True,
-        ) as (read_stream, write_stream, _):
-            async with ClientSession(read_stream, write_stream) as session:
-                await session.initialize()
-                result = await session.call_tool(tool_name, dict(arguments))
+        *,
+        tool_config: Mapping[str, Any] | None = None,
+        tool_context: Mapping[str, Any] | None = None,
+        timeout_seconds: float | None = None,
+    ) -> CallToolResult:
+        meta: dict[str, Any] = {}
+        if tool_config:
+            meta[WISEPEN_TOOL_CONFIG_META_KEY] = dict(tool_config)
+        if tool_context:
+            meta[WISEPEN_TOOL_CONTEXT_META_KEY] = dict(tool_context)
 
-        output = json.dumps(result.structuredContent, ensure_ascii=False, default=str)
-        if getattr(result, "isError", False):
-            raise RuntimeError(output or f"MCP tool '{tool_name}' returned an error.")
-        return output
+        timeout = self._timeout if timeout_seconds is None else timeout_seconds
+        async with AsyncClient(
+            headers=self._build_headers(),
+            timeout=timeout,
+        ) as http_client:
+            async with streamable_http_client(
+                url=await self._resolve_url(),
+                http_client=http_client,
+                terminate_on_close=True,
+            ) as (read_stream, write_stream, _):
+                async with ClientSession(read_stream, write_stream) as session:
+                    await session.initialize()
+                    return await session.call_tool(
+                        tool_name,
+                        dict(arguments),
+                        meta=meta or None,
+                    )
 
     async def _resolve_url(self) -> str:
         instance = await self._discovery.pick(self._service_name, strategy=self._strategy)

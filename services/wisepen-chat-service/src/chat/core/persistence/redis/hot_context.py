@@ -1,13 +1,14 @@
 import json
 import redis.asyncio as redis
 from typing import List
-from chat.domain.repositories import HotContextRepository
-from chat.domain.entities import ChatMessage
+
 from chat.core.config.app_settings import settings
+from chat.domain.entities import ChatMessage
+from chat.domain.repositories import HotContextRepository
 
 
 class RedisHotContext(HotContextRepository):
-    def __init__(self):
+    def __init__(self) -> None:
         self.redis = redis.from_url(settings.REDIS_URL, decode_responses=True)
         self.ttl = 3600 * 24 * 7  # 会话上下文保留一个周
 
@@ -45,5 +46,3 @@ class RedisHotContext(HotContextRepository):
             await pipe.rpush(key, *serialized)
             await pipe.expire(key, self.ttl)
             await pipe.execute()
-
-

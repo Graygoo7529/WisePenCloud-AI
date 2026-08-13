@@ -1,5 +1,4 @@
 import asyncio
-import json
 import uuid
 from typing import AsyncIterator, Awaitable, Callable, Iterator, List, Optional, Union
 
@@ -48,6 +47,7 @@ class _StepEventInterpreter:
     - 收集 tool_call
     - 向外产出 StreamEvent
     """
+
     def __init__(self) -> None:
         self.text_id = f"txt_{uuid.uuid4().hex}"
         self.reasoning_id = f"rsn_{uuid.uuid4().hex}"
@@ -122,6 +122,7 @@ class _StepEventInterpreter:
 # QueryLoopRuntime
 # =============================================================================
 
+
 def _merge_runtime_options(defaults: dict, overrides: dict) -> dict:
     result = dict(defaults or {})
     for key, value in (overrides or {}).items():
@@ -131,19 +132,21 @@ def _merge_runtime_options(defaults: dict, overrides: dict) -> dict:
             result[key] = value
     return result
 
+
 class QueryLoopRuntime:
     """
     负责与 LLM 的全部交互：支持并行 Tool Calling（asyncio.gather）和多轮推理循环（while + MAX_ITERATIONS）
     """
 
-    def __init__(self, llm_provider_resolver: LLMProviderResolver, token_counter: TokenCounter) -> None:
+    def __init__(self, llm_provider_resolver: LLMProviderResolver, token_counter: TokenCounter, tool_dispatcher: ToolDispatcher) -> None:
         self._llm_provider_resolver = llm_provider_resolver
         self._token_counter = token_counter
-        self._tool_dispatcher = ToolDispatcher()
+        self._tool_dispatcher = tool_dispatcher
 
     """
     ReAct 循环主入口 (QueryLoop)
     """
+
     async def stream_chat_with_tool_calling(
         self,
         messages: List[ChatMessage],
@@ -225,6 +228,7 @@ class QueryLoopRuntime:
     """
     Agent Step：发起一次流式推理 → 解析 → 若需要则执行工具
     """
+
     async def _run_single_step(
         self,
         messages: List[ChatMessage],
@@ -412,8 +416,8 @@ class QueryLoopRuntime:
                     raise asyncio.CancelledError
                 # 通过工具 core 并发执行并归约结果
                 output = await self._tool_dispatcher.dispatch(classified_tool_invocations.server_tools, tool_scope)
-                tool_outputs.extend(output.results)
-            else:
+                tool_outputs.extend(output)
+            else: # 当前有客户端工具的调用结果和工具批准状态
                 # 无需再为每个 parsed tool_call 产生两阶段 input 事件（历史上已经产生了）
 
                 # 把tool_invocations 分组为 approval_required, server, client
@@ -427,7 +431,7 @@ class QueryLoopRuntime:
                         classified_tool_invocations.server_tools,
                         tool_scope,
                     )
-                    tool_outputs.extend(output.results)
+                    tool_outputs.extend(output)
 
                 # 如果有工具需要审批
                 if classified_tool_invocations.approval_required_tools:
@@ -442,7 +446,7 @@ class QueryLoopRuntime:
 
                     # 通过工具 core 并发执行并归约结果
                     output = await self._tool_dispatcher.dispatch(classified_tool_invocations.approval_required_tools, tool_scope)
-                    tool_outputs.extend(output.results)
+                    tool_outputs.extend(output)
                 # 如果有客户端工具
                 if classified_tool_invocations.client_tools:
                     # 通过工具 core 并发执行并归约结果
@@ -452,15 +456,11 @@ class QueryLoopRuntime:
                     if cancel_requested is not None and await cancel_requested():
                         raise asyncio.CancelledError
                     output = await self._tool_dispatcher.client_dispatch(classified_tool_invocations.client_tools, client_tool_results, tool_scope)
-                    tool_outputs.extend(output.results)
+                    tool_outputs.extend(output)
 
             for result in tool_outputs:
                 tool = tool_scope.get(result.tool_invocation.tool_name)
                 result = tool_result_renderer(result, tool.definition if tool else None)
-                # ChatMessage.content 只接受字符串；客户端工具结果可以是结构化对象。
-                tool_message_content = result.tool_output
-                if not isinstance(tool_message_content, str):
-                    tool_message_content = "" if tool_message_content is None else json.dumps(tool_message_content, ensure_ascii=False, default=str)
 
                 yield ToolOutputAvailableEvent(
                     call_id=result.tool_call_id,
@@ -472,7 +472,7 @@ class QueryLoopRuntime:
                         role=Role.TOOL,
                         tool_call_id=result.tool_call_id,
                         tool_name=result.tool_name,
-                        content=tool_message_content,
+                        content=result.tool_output,
                         imgs=result.images,
                         persisted_output_placeholder=result.persisted_output_placeholder,
                     )

@@ -19,7 +19,7 @@ from fastapi import FastAPI
 
 from common.web.exception_handlers import setup_global_exception_handlers
 from common.web.middleware import SecurityHeaderMiddleware
-from wisepen_mcp.capabilities.skill_creator import build_skill_creator_mcp
+from wisepen_mcp.capabilities import build_mcp_server
 from wisepen_mcp.container import container
 from wisepen_mcp.core.config.app_settings import settings
 from wisepen_mcp.core.config.nacos import nacos_client_manager
@@ -32,7 +32,9 @@ os.environ["no_proxy"] = no_proxy
 os.environ["NO_PROXY"] = no_proxy
 
 
-mcp_server = build_skill_creator_mcp(container.ai_asset_client())
+mcp_server = build_mcp_server(
+    ai_asset_client=container.ai_asset_client()
+)
 mcp_app = mcp_server.streamable_http_app()
 
 

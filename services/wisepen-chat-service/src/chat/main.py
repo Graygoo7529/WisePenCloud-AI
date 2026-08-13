@@ -42,7 +42,8 @@ from chat.domain.entities import ChatSession, ChatMessage, Provider, Model, Mode
 # 避免 HTTP 代理拦截内部中间件请求。
 no_proxy = ",".join(filter(None, [
     os.environ.get("NO_PROXY") or os.environ.get("no_proxy") or "",
-    "localhost, 127.0.0.1"
+    "localhost, 127.0.0.1",
+    settings.QDRANT_HOST,
 ]))
 os.environ["no_proxy"] = no_proxy
 os.environ["NO_PROXY"] = no_proxy
@@ -106,7 +107,6 @@ async def lifespan(app: FastAPI):
         await container.service_discovery().close()
     except Exception as e:
         error("service discovery close failed.", exc=e)
-
     try:
         await nacos_client_manager.deregister_instance()
     except Exception as e:
