@@ -16,8 +16,8 @@ from common.security.context import SecurityContextHolder
 
 _DEFAULT_SERVICE_NAME = "wisepen-mcp-service"
 _MCP_PATH = "/mcp/"
-_MCP_TOOL_CONFIG_META_KEY = "wisepen/tool_config"
-_MCP_TOOL_CONTEXT_META_KEY = "wisepen/tool_context"
+WISEPEN_TOOL_CONFIG_META_KEY = "com.wisepen/tool_config"
+WISEPEN_TOOL_CONTEXT_META_KEY = "com.wisepen/tool_context"
 McpToolStructuredContent: TypeAlias = dict[str, Any] | None
 
 
@@ -75,9 +75,9 @@ class McpServiceClient:
     ) -> McpToolStructuredContent:
         meta: dict[str, Any] = {}
         if tool_config:
-            meta[_MCP_TOOL_CONFIG_META_KEY] = dict(tool_config)
+            meta[WISEPEN_TOOL_CONFIG_META_KEY] = dict(tool_config)
         if tool_context:
-            meta[_MCP_TOOL_CONTEXT_META_KEY] = dict(tool_context)
+            meta[WISEPEN_TOOL_CONTEXT_META_KEY] = dict(tool_context)
 
         timeout = self._timeout if timeout_seconds is None else timeout_seconds
         async with AsyncClient(

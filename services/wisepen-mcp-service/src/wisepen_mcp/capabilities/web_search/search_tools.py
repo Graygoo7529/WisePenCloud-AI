@@ -15,7 +15,7 @@ from common.utils.ranking import (
     RankRequest,
     RankingPipeline,
 )
-from wisepen_mcp.capabilities.core.tools import get_tool_config_value
+from wisepen_mcp.capabilities.core.tool_metadata import get_tool_config_value
 from wisepen_mcp.domain.error_codes import McpErrorCode
 
 
