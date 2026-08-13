@@ -2,7 +2,6 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any, Protocol, Dict, Callable, TYPE_CHECKING
 
-from chat.application.events import StreamEvent
 from chat.domain.entities import ChatMessage
 
 if TYPE_CHECKING:

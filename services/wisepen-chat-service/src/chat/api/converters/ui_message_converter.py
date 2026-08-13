@@ -56,12 +56,26 @@ def _build_user_ui_message(msg: ChatMessage) -> Dict[str, Any]:
     parts: List[Dict[str, Any]] = []
     if msg.content:
         parts.append({"type": "text", "text": msg.content, "state": "done"})
-    return {
+    metadata = dict(msg.metadata or {})
+    if msg.attachments:
+        metadata["attachments"] = [
+            {
+                "attachmentId": attachment.attachment_id,
+                "filename": attachment.name,
+                "kind": attachment.kind,
+                "available": True,
+            }
+            for attachment in msg.attachments
+        ]
+    result = {
         "id": str(msg.id) if msg.id else "",
         "role": "user",
         "parts": parts,
         "createdAt": msg.created_at.isoformat(),
     }
+    if metadata:
+        result["metadata"] = metadata
+    return result
 
 
 def _build_assistant_ui_message(

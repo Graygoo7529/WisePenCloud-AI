@@ -244,16 +244,19 @@ class QueryLoopRuntime:
         # 发 step 开始事件
         yield StepStartEvent()
 
-        # 创建本轮推理的事件解释器
-        event_interpreter = _StepEventInterpreter()
-
-        # schema 已由 ToolScope 在构造期固化；仅在模型和 LLM Provider 均声明支持工具时传给 LLM
-        tool_schemas = tool_scope.schemas() \
-            if model_info.support_tools and llm_provider.supports_tools() else []
-
         token_usage = 0
-        # 当前没有客户端工具的调用结果和工具批准状态，则请求模型，否则跳过
-        if client_tool_results is None and tool_approval_status is None:
+        is_resumed_tool_step = client_tool_results is not None or tool_approval_status is not None
+        if is_resumed_tool_step:
+            # 挂起前的 assistant 工具调用已在 messages 末尾，恢复时由它重建本轮工具阶段。
+            tool_calls = messages[-1].tool_calls or []
+            new_messages: List[ChatMessage] = []
+        else:
+            # 正常 step 由 Provider 事件解释器构造 assistant 和工具调用。
+            # 创建本轮推理的事件解释器
+            event_interpreter = _StepEventInterpreter()
+            # schema 已由 ToolScope 在构造期固化；仅在模型和 LLM Provider 均声明支持工具时传给 LLM
+            tool_schemas = tool_scope.schemas() \
+                if model_info.support_tools and llm_provider.supports_tools() else []
             try:
                 # 调用模型流式接口，Provider 内部负责原生协议解析并产出 LLMStreamEvent 事件
                 async for llm_provider_event in llm_provider.stream_chat_completion(
@@ -348,6 +351,9 @@ class QueryLoopRuntime:
                 yield StepFinishEvent(is_finished=True, final_assistant_message=assistant_msg, token_usage=token_usage)
                 return
 
+            tool_calls = event_interpreter.tool_calls
+            new_messages = [assistant_msg]
+
         # 如果有工具调用，则进入工具阶段
 
         # 构造工具调用
@@ -358,15 +364,12 @@ class QueryLoopRuntime:
                 tool_call_arguments=tool_call.arguments,
                 query_loop_iteration=iteration,
             )
-            for tool_call in event_interpreter.tool_calls
+            for tool_call in tool_calls
         ]
-
-        new_messages: List[ChatMessage] = [assistant_msg]
 
         tool_outputs: list[ToolExecutionResult] = []
         try:
-            # 当前没有客户端工具的调用结果和工具批准状态
-            if client_tool_results is None and tool_approval_status is None:
+            if not is_resumed_tool_step:
                 # 请求取消检查点
                 if cancel_requested is not None and await cancel_requested():
                     raise asyncio.CancelledError
@@ -420,6 +423,16 @@ class QueryLoopRuntime:
                 # 把tool_invocations 分组为 approval_required, server, client
                 classified_tool_invocations = classify_tools(invocations, tool_scope)
 
+                # 首次 step 只要包含客户端或审批工具就会整体挂起，server tools 也在此处补执行。
+                if classified_tool_invocations.server_tools:
+                    if cancel_requested is not None and await cancel_requested():
+                        raise asyncio.CancelledError
+                    output = await self._tool_dispatcher.dispatch(
+                        classified_tool_invocations.server_tools,
+                        tool_scope,
+                    )
+                    tool_outputs.extend(output)
+
                 # 如果有工具需要审批
                 if classified_tool_invocations.approval_required_tools:
                     # 检查审批状态
@@ -449,6 +462,11 @@ class QueryLoopRuntime:
                 tool = tool_scope.get(result.tool_invocation.tool_name)
                 result = tool_result_renderer(result, tool.definition if tool else None)
 
+                # ChatMessage.content 只接受字符串；客户端工具结果可以是结构化对象。
+                tool_message_content = result.tool_output
+                if not isinstance(tool_message_content, str):
+                    tool_message_content = "" if tool_message_content is None else json.dumps(tool_message_content, ensure_ascii=False, default=str)
+
                 yield ToolOutputAvailableEvent(
                     call_id=result.tool_call_id,
                     output=result.tool_output,
@@ -459,7 +477,8 @@ class QueryLoopRuntime:
                         role=Role.TOOL,
                         tool_call_id=result.tool_call_id,
                         tool_name=result.tool_name,
-                        content=result.tool_output,
+                        content=tool_message_content,
+                        imgs=result.images,
                         persisted_output_placeholder=result.persisted_output_placeholder,
                     )
                 )

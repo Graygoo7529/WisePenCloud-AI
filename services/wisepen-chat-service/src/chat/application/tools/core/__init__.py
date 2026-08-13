@@ -31,6 +31,7 @@ from chat.application.tools.core.llm.renderer import (
 
 from chat.application.tools.core.execution.result import (
     ToolExecutionError,
+    ToolExecutionImageOutput,
     ToolExecutionResult,
 )
 
@@ -83,6 +84,7 @@ __all__ = [
 
     # execution result
     "ToolExecutionError",
+    "ToolExecutionImageOutput",
     "ToolExecutionResult",
 
     # execution

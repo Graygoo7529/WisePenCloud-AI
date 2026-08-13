@@ -6,7 +6,11 @@ from typing import Any
 
 from chat.application.tools.core.definition import ClientToolResult, ToolRiskLevel
 from chat.application.tools.core.execution.hooks.builtin import JsonSchemaCheck, RequiredContextCheck
-from chat.application.tools.core.execution.result import ToolExecutionError, ToolExecutionResult
+from chat.application.tools.core.execution.result import (
+    ToolExecutionError,
+    ToolExecutionImageOutput,
+    ToolExecutionResult,
+)
 
 from chat.application.tools.core.llm.invocation import ToolInvocation
 from chat.application.tools.core.output_cache.cache_manager import ToolOutputCache
@@ -122,6 +126,12 @@ class ToolExecutor:
                 tool_name=invocation.tool_name,
             )
 
+            images = []
+            # 有视觉能力的工具需要返回 ToolExecutionImageOutput 对象
+            if isinstance(output, ToolExecutionImageOutput):
+                images = output.images
+                output = output.text
+
             output = await self._output_cache.process(
                 tool_output=output,
                 invocation=invocation,
@@ -130,7 +140,7 @@ class ToolExecutor:
 
             return ToolExecutionResult(tool_invocation=invocation, tool_output=output,
                                        started_at=started_at, finished_at=datetime.now(timezone.utc),
-                                       tool_execution_error=None)
+                                       tool_execution_error=None, images=images)
         except ToolExecutionError as tool_execution_error:
             return ToolExecutionResult(tool_invocation=invocation, tool_output=None,
                                        started_at=started_at, finished_at=datetime.now(timezone.utc),

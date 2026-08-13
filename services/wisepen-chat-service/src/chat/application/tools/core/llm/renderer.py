@@ -6,6 +6,8 @@ from typing import Any
 
 from chat.application.tools.core.definition import ToolLLMSpec, ToolDefinition
 from chat.application.tools.core.execution.result import ToolExecutionResult
+from chat.domain.entities import VisionImage
+
 from pydantic import BaseModel
 import orjson
 
@@ -22,11 +24,12 @@ def schema_renderer(llm_spec: ToolLLMSpec) -> dict[str, Any]:
 
 @dataclass(frozen=True, slots=True)
 class RenderToolResult:
-    """可写入模型上下文和会话记录的最终工具输出。"""
+    """可写入模型上下文和会话记录的最终工具输出"""
     tool_call_id: str
     tool_name: str
     persisted_output_placeholder: str | None
-    tool_output: str
+    tool_output: Any | None
+    images: list[VisionImage]
 
 def tool_result_renderer(tool_result: ToolExecutionResult, tool_definition: ToolDefinition | None) -> RenderToolResult:
     if tool_result.tool_execution_error is not None:
@@ -57,7 +60,8 @@ def tool_result_renderer(tool_result: ToolExecutionResult, tool_definition: Tool
         tool_call_id=tool_result.tool_invocation.tool_call_id,
         tool_name=tool_result.tool_invocation.tool_name,
         persisted_output_placeholder=persisted_output_placeholder,
-        tool_output=output
+        tool_output=output,
+        images=tool_result.images,
     )
 
 

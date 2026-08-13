@@ -111,3 +111,4 @@ class UIMessageResponse(BaseModel):
     role: str
     parts: List[UIMessagePartResponse]
     createdAt: Optional[str] = None
+    metadata: Optional[dict[str, Any]] = None

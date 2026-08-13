@@ -73,17 +73,29 @@ class LiteLLMAdapter(LLMProvider, TextCompletionProvider):
                 continue
             if message.role == Role.TOOL:
                 # LiteLLM fallback 使用 OpenAI-compatible 的 role="tool" message
+                content = [{"type": "text", "text": message.content or ""}]
+                if message.imgs:
+                    content.extend({
+                        "type": "image_url",
+                        "image_url": {"url": f"data:{img.media_type};base64,{img.base64_data}"},
+                    } for img in message.imgs)
                 formatted_messages.append({
                     "role": "tool",
                     "tool_call_id": message.tool_call_id,
                     "name": message.tool_name,
-                    "content": message.content or "",
+                    "content": content,
                 })
                 continue
             # 对于用户消息，或其他非 LiteLLM 提供的消息
+            content: Any = [{"type": "text", "text": message.content or ""}]
+            if message.imgs:
+                content.extend({
+                    "type": "image_url",
+                    "image_url": {"url": f"data:{img.media_type};base64,{img.base64_data}"},
+                } for img in message.imgs)
             formatted_messages.append({
                 "role": message.role.value,
-                "content": message.content or ""
+                "content": content,
             })
         return formatted_messages
 

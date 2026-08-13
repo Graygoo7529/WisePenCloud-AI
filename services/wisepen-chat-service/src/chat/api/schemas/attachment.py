@@ -18,6 +18,7 @@ class InitUploadResponse(BaseModel):
     object_key: str = Field(..., description="OSS object key")
     put_url: str = Field(..., description="OSS 预签名上传 URL")
     callback_header: str = Field(default="", description="OSS 回调 header")
+    flash_uploaded: bool = Field(..., description="是否已由文件存储服务完成秒传")
 
 class AddResourceAttachmentsRequest(BaseModel):
     session_id: str = Field(..., description="会话 ID")

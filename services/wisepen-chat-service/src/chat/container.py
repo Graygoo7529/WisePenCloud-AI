@@ -47,6 +47,7 @@ from chat.application.tools.core.mcp import McpClient, McpToolCatalog, SystemMcp
 from chat.application.tools.core.output_cache.cache_manager import ToolOutputCache
 from chat.application.tools.core.output_cache.cache_store import ToolContentStore
 from chat.application.tools.session_tools.get_historical_chat_messages_tool import GetHistoricalChatMessagesTool
+from chat.application.tools.session_tools.load_image_attachment_tool import LoadImageAttachmentTool
 from chat.application.tools.session_tools.tool_content_tools import (
     ToolContentGetStructureTool,
     ToolContentReadPagesTool,
@@ -218,6 +219,10 @@ class Container(containers.DeclarativeContainer):
         GetHistoricalChatMessagesTool,
         message_repo=message_repo,
     )
+    load_image_attachment_tool = providers.Singleton(
+        LoadImageAttachmentTool,
+        file_loader=oss_file_loader,
+    )
     # LoadSkillTool / LoadSkillAssetTool
     load_skill_tool = providers.Singleton(
         LoadSkillTool,
@@ -257,6 +262,7 @@ class Container(containers.DeclarativeContainer):
     )
     tool_providers = providers.List(
         search_history_tool,
+        load_image_attachment_tool,
         load_skill_tool,
         load_skill_asset_tool,
         tool_content_get_structure_tool,
@@ -293,6 +299,7 @@ class Container(containers.DeclarativeContainer):
         skill_matcher=skill_matcher,
         suspended_chat_repo=suspended_chat_repo,
         agent_resolver=agent_resolver,
+        oss_file_loader=oss_file_loader,
     )
 
     chat_turn_stream_manager = providers.Singleton(

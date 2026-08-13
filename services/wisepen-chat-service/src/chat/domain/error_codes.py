@@ -25,6 +25,8 @@ class ChatErrorCode(IErrorCode):
     MODEL_SCOPE_MISMATCH = (40025, "模型、供应商或映射作用域不一致")
     MODEL_PROVIDER_TYPE_UNSUPPORTED = (40026, "供应商类型不支持该模型")
     MODEL_RUNTIME_OPTIONS_INVALID = (40027, "模型运行时参数不合法")
+    MODEL_VISION_UNSUPPORTED = (40028, "当前模型不支持图片输入")
+    IMAGE_INPUT_INVALID = (40029, "图片输入不合法")
 
     # --- Tool 相关 ---
     TOOL_NOT_FOUND = (40031, "工具不存在")
