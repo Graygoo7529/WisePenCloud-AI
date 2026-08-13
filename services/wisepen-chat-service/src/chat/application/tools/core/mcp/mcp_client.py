@@ -1,6 +1,5 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
-import json
 import asyncio
 import ipaddress
 import socket
@@ -82,7 +81,7 @@ class McpClient:
         arguments: Mapping[str, Any],
         *,
         timeout_seconds: float | None = None,
-    ) -> str:
+    ) -> CallToolResult:
         url = await self._resolve_url(server)
 
         async with AsyncClient(
@@ -96,12 +95,7 @@ class McpClient:
             ) as (read_stream, write_stream, _):
                 async with ClientSession(read_stream, write_stream) as session:
                     await session.initialize()
-                    result = await session.call_tool(tool_name, dict(arguments))
-
-        output = _stringify_tool_result(result)
-        if getattr(result, "isError", False):
-            raise RuntimeError(output or f"MCP tool '{tool_name}' returned an error.")
-        return output
+                    return await session.call_tool(tool_name, dict(arguments))
 
     async def _resolve_url(self, server: McpServerConnection) -> str:
         parsed_url = urlparse((server.url or "").strip())
@@ -159,18 +153,3 @@ class McpClient:
                 raise ServiceException(ChatErrorCode.MCP_TOOL_SERVER_URL_INVALID, f"MCP server resolves to an unsafe address: {ip}")
 
         return server.url.strip()
-
-
-def _stringify_tool_result(result: CallToolResult) -> str:
-    parts: list[str] = []
-    for item in result.content:
-        if item.text is not None:
-            parts.append(str(item.text))
-        else:
-            parts.append(str(item))
-    if parts:
-        return "\n".join(parts)
-
-    if result.structuredContent is not None:
-        return json.dumps(result.structuredContent, ensure_ascii=False, default=str)
-    return ""

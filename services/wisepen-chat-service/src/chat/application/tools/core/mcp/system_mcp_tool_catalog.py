@@ -67,7 +67,7 @@ _SYSTEM_TOOL_CONFIGS: List[dict[str, Any]] = [{
         ),
         "failure_reason": "Skill Info Load Failed",
     }, {
-        "tool_name": "create_skill_info",
+        "tool_name": "update_skill_info",
         "policy": ToolPolicy(
             expose_by_default=False,
             risk_level=ToolRiskLevel.MEDIUM,

@@ -1,9 +1,10 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
-from typing import Dict
+import json
 
+from chat.application.tools.core.execution.result import CacheableText, ToolOutput
 from chat.application.tools.core.llm.invocation import ToolInvocation
-from dataclasses import dataclass, field, asdict
+from dataclasses import asdict
 from typing import Any
 
 from chat.application.tools.core.output_cache.cache_store import ToolContentStore, ToolContentReceipt
@@ -11,18 +12,6 @@ from chat.core.config.app_settings import settings
 from common.logger import warn
 
 _TRUNCATION_MARKER = "\n...\n"
-
-
-@dataclass(frozen=True, slots=True)
-class CacheableText:
-    content: str  # 可缓存正文
-    is_markdown: bool = False  # # 是否为 MD 格式 (影响缓存)
-    metadata: Dict[str, Any] = field(default_factory=dict)
-
-@dataclass(frozen=True, slots=True, kw_only=True)
-class ToolStandardOutput:
-    uncacheable_result: Dict[str, Any] = field(default_factory=dict)  # 不可缓存结果
-    cacheable_results: tuple[CacheableText, ...] = ()  # 可缓存结果
 
 
 class ToolOutputCache:
@@ -34,20 +23,15 @@ class ToolOutputCache:
 
         self._content_store = tool_content_store
 
-    async def process(self, *, tool_output: Any, invocation: ToolInvocation, session_id: str) -> Dict[str, Any] | Any:
-        if not isinstance(tool_output, ToolStandardOutput):
-            return tool_output # 如果工具未输出 ToolStandardOutput 类型的输出，不进行缓存处理
-
-        # 复制工具本来可见的结果
-        payload = dict(tool_output.uncacheable_result)
-
+    async def process(self, *, tool_output: ToolOutput, invocation: ToolInvocation, session_id: str) -> ToolOutput:
         # 挑出非空正文
         cacheable_texts = tuple(
-            cacheable_text for cacheable_text in tool_output.cacheable_results
+            cacheable_text for cacheable_text in tool_output.cacheable_texts
             if cacheable_text.content and not cacheable_text.content.isspace()
         )
 
-        if not cacheable_texts: return payload # 无可缓存文本，直接返回原始 payload
+        if not cacheable_texts:
+            return tool_output
 
         receipts: dict[int, ToolContentReceipt] = {}
 
@@ -69,8 +53,7 @@ class ToolOutputCache:
                 receipts[index] = result
 
         preview_budget = self._preview_budget_calc(cacheable_texts)
-
-        payload["contents"] = []
+        contents: list[dict[str, Any]] = []
         for index, cacheable_text in enumerate(cacheable_texts):
             preview, truncated = self._build_preview_text(cacheable_text.content, preview_budget[index])
 
@@ -84,9 +67,19 @@ class ToolOutputCache:
             receipt = receipts.get(index)
             if receipt is not None: item.update(asdict(receipt))
 
-            payload["contents"].append(item)
+            contents.append(item)
 
-        return payload
+        try:
+            payload = json.loads(tool_output.content)
+        except json.JSONDecodeError:
+            payload = {"text": tool_output.content}
+        if not isinstance(payload, dict): # tool_output.content 是合法 JSON 但不是 object
+            payload = {"output": payload}
+        payload["contents"] = contents
+        return ToolOutput(
+            content=json.dumps(payload, ensure_ascii=False),
+            images=tool_output.images,
+        )
 
     def _preview_budget_calc(
         self,
@@ -140,22 +133,3 @@ class ToolOutputCache:
         tail_budget = available // 2
         tail = text[-tail_budget:] if tail_budget else ""
         return text[:head_budget] + _TRUNCATION_MARKER + tail, True
-
-def parse_tool_standard_output(output: Any) -> Any:
-    if not isinstance(output, Dict):
-        return output
-    uncacheable_result = output.get("uncacheable_result")
-    cacheable_results = output.get("cacheable_results")
-    if not isinstance(uncacheable_result, Dict) or not isinstance(cacheable_results, (list, tuple)):
-        return output
-    return ToolStandardOutput(
-        uncacheable_result=uncacheable_result,
-        cacheable_results=tuple(
-            CacheableText(
-                content=str(item["content"]),
-                is_markdown=bool(item.get("is_markdown", False)),
-                metadata=item.get("metadata", {}) if isinstance(item.get("metadata", {}), Dict) else {}
-            )
-            for item in cacheable_results if isinstance(item, Dict) and "content" in item
-        ),
-    )

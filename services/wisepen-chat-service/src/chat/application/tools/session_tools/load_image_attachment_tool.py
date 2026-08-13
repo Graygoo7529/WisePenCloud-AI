@@ -4,7 +4,7 @@ from typing import Any
 from chat.application.tools.core import (
     ToolDefinition,
     ToolExecutionError,
-    ToolExecutionImageOutput,
+    ToolOutput,
     ToolLLMSpec,
     ToolParametersSchema,
     ToolPolicy,
@@ -63,7 +63,7 @@ class LoadImageAttachmentTool:
         context: dict[str, Any],
         config: dict[str, Any] | None = None,
         **kwargs: Any,
-    ) -> ToolExecutionImageOutput:
+    ) -> ToolOutput:
         attachment_id = str(kwargs.get("attachment_id") or "").strip()
         if not attachment_id:
             raise ToolExecutionError(
@@ -108,8 +108,8 @@ class LoadImageAttachmentTool:
                 detail_reason=f"Image attachment '{attachment_id}' could not be loaded within size limits.",
             )
 
-        return ToolExecutionImageOutput(
-            text=f"[Loaded image attachment: {ref.attachment_name}, attachment_id={ref.attachment_id}]",
+        return ToolOutput(
+            content=f"[Loaded image attachment: {ref.attachment_name}, attachment_id={ref.attachment_id}]",
             images=[
                 VisionImage(
                     media_type=media_type,

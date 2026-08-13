@@ -23,7 +23,7 @@ class ToolInputAvailableEvent(StreamEvent):
 class ToolOutputAvailableEvent(StreamEvent):
     """工具调用输出已可用。"""
     call_id: str
-    output: Any
+    output: str
 
 
 @dataclass(frozen=True)

@@ -72,7 +72,7 @@ def tool_input_available(tool_call_id: str, tool_name: str, input: Dict) -> str:
     return _sse({"type": "tool-input-available", "toolCallId": tool_call_id, "toolName": tool_name, "input": input})
 
 
-def tool_output_available(tool_call_id: str, output: Union[Dict, str]) -> str:
+def tool_output_available(tool_call_id: str, output: str) -> str:
     return _sse({"type": "tool-output-available", "toolCallId": tool_call_id, "output": output})
 
 # 自定义事件 data-tool-execution-error

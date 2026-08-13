@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import json
-from typing import Any, Mapping, Optional, TypeAlias
+from typing import Any, Mapping, Optional
 
 from httpx import AsyncClient
 from mcp import ClientSession
 from mcp.client.streamable_http import streamable_http_client
+from mcp.types import CallToolResult
 
 from chat.domain.entities.mcp_tool_server_config import McpToolDescriptor
 from common.cloud.service_discovery import LoadBalancingStrategy, ServiceDiscovery
@@ -18,7 +19,6 @@ _DEFAULT_SERVICE_NAME = "wisepen-mcp-service"
 _MCP_PATH = "/mcp/"
 WISEPEN_TOOL_CONFIG_META_KEY = "com.wisepen/tool_config"
 WISEPEN_TOOL_CONTEXT_META_KEY = "com.wisepen/tool_context"
-McpToolStructuredContent: TypeAlias = dict[str, Any] | None
 
 
 class McpServiceClient:
@@ -72,7 +72,7 @@ class McpServiceClient:
         tool_config: Mapping[str, Any] | None = None,
         tool_context: Mapping[str, Any] | None = None,
         timeout_seconds: float | None = None,
-    ) -> McpToolStructuredContent:
+    ) -> CallToolResult:
         meta: dict[str, Any] = {}
         if tool_config:
             meta[WISEPEN_TOOL_CONFIG_META_KEY] = dict(tool_config)
@@ -91,22 +91,11 @@ class McpServiceClient:
             ) as (read_stream, write_stream, _):
                 async with ClientSession(read_stream, write_stream) as session:
                     await session.initialize()
-                    result = await session.call_tool(
+                    return await session.call_tool(
                         tool_name,
                         dict(arguments),
                         meta=meta or None,
                     )
-
-        if getattr(result, "isError", False):
-            error_output = json.dumps(
-                result.structuredContent,
-                ensure_ascii=False,
-                default=str,
-            )
-            raise RuntimeError(
-                error_output or f"MCP tool '{tool_name}' returned an error."
-            )
-        return result.structuredContent
 
     async def _resolve_url(self) -> str:
         instance = await self._discovery.pick(self._service_name, strategy=self._strategy)

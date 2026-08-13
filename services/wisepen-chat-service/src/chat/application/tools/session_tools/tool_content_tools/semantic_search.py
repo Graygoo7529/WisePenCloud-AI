@@ -99,7 +99,7 @@ class ToolContentSemanticSearchTool:
         store: ToolContentStore,
     ) -> None:
         self._store = store
-        self._ranking_pipeline = build_tool_content_semantic_search_pipeline(),
+        self._ranking_pipeline = build_tool_content_semantic_search_pipeline()
         self._definition = ToolDefinition(
             llm_spec=ToolLLMSpec(
                 name="tool_content_semantic_search",
