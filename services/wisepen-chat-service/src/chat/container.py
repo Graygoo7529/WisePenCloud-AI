@@ -17,6 +17,7 @@ from chat.core.providers import (
     OssFileLoader,
     IflytekSpeechProvider,
 )
+from chat.core.providers.agent_assets import AgentOssFileLoader
 from chat.application.llm_provider_resolver import LLMProviderResolver
 from chat.application.token_counter import TokenCounter
 from chat.core.persistence import (
@@ -36,6 +37,9 @@ from chat.application.chat_turn_coordinator import ChatTurnCoordinator
 from chat.application.chat_turn_stream_manager import ChatTurnStreamManager
 from chat.application.agents import (
     DefaultAgentResolver,
+    AgentAssetLoader,
+    CompositeAgentResolver,
+    RemoteAgentResolver,
 )
 from chat.application.tools.skill_tools.utils.skill_matcher import DefaultSkillMatcher
 from chat.application.tools.skill_tools import LoadSkillAssetTool
@@ -170,6 +174,27 @@ class Container(containers.DeclarativeContainer):
         cache_ttl_seconds=settings.OSS_CACHE_TTL_SECONDS,
         gc_interval_seconds=settings.OSS_CACHE_GC_INTERVAL_SECONDS,
     )
+    agent_oss_file_loader = providers.Singleton(
+        AgentOssFileLoader,
+        file_storage_client=file_storage_client,
+        cache_dir=settings.AGENT_OSS_CACHE_DIR,
+        cache_ttl_seconds=settings.AGENT_OSS_CACHE_TTL_SECONDS,
+        gc_interval_seconds=settings.AGENT_OSS_CACHE_GC_INTERVAL_SECONDS,
+    )
+    agent_asset_loader = providers.Singleton(
+        AgentAssetLoader,
+        file_loader=agent_oss_file_loader,
+    )
+    default_agent_resolver = providers.Singleton(DefaultAgentResolver)
+    remote_agent_resolver = providers.Singleton(
+        RemoteAgentResolver,
+        ai_asset_client=ai_asset_client,
+    )
+    agent_resolver = providers.Singleton(
+        CompositeAgentResolver,
+        primary=remote_agent_resolver,
+        fallback=default_agent_resolver,
+    )
 
     # Skill 子系统：
     # - SkillRepository 从 Java ai-asset 读取 Skill
@@ -178,7 +203,6 @@ class Container(containers.DeclarativeContainer):
         DefaultSkillMatcher,
         ai_asset_client=ai_asset_client,
     )
-    agent_resolver = providers.Singleton(DefaultAgentResolver)
     kafka_producer = providers.Singleton(
         KafkaProducerClient,
         bootstrap_servers=settings.KAFKA_BOOTSTRAP_SERVERS,
