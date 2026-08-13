@@ -1,5 +1,5 @@
 # src/chat/domain/entities/__init__.py
-from .message import ChatMessage, MessageModelInfo, Role, ToolCallMessage
+from .message import ChatMessage, VisionImage, MessageAttachmentRef, MessageModelInfo, Role, ToolCallMessage
 from .session import AttachmentRef, ChatSession, ResourceAttachmentRef, TemporaryAttachmentRef
 from .file_storage import StorageRecord, UploadInitResponse
 from .model import ModelType, ModelFamily, ModelScope, Model, ModelProviderMapping
@@ -11,7 +11,7 @@ from .mcp_tool_server_config import McpToolSnapshot, McpToolStatus, UserMcpServe
 from .suspended_chat import SuspendedChat
 
 __all__ = [
-    "ChatMessage", "MessageModelInfo", "Role", "ToolCallMessage",
+    "ChatMessage", "VisionImage", "MessageAttachmentRef", "MessageModelInfo", "Role", "ToolCallMessage",
     "AttachmentRef", "ChatSession", "ResourceAttachmentRef", "TemporaryAttachmentRef",
     "StorageRecord", "UploadInitResponse",
     "ModelType", "ModelFamily", "ModelScope", "Model", "ModelProviderMapping",

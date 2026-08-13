@@ -13,6 +13,7 @@ from chat.core.config.app_settings import settings
 from chat.domain.entities import ChatMessage, Role
 from chat.application.llm_provider_resolver import LLMProviderResolver
 from chat.application.token_counter import TokenCounter
+from chat.core.providers import OssFileLoader
 from chat.domain.interfaces.llm import TextCompletionProvider
 from chat.domain.interfaces.memory import MemoryProvider
 from chat.domain.repositories import SessionRepository, MessageRepository, HotContextRepository, ModelRepository, \
@@ -38,6 +39,7 @@ from common.kafka.producer import KafkaProducerClient
 _SKILL_TOOL_NAMES = frozenset({"load_skill", "load_skill_asset"})
 # Session 工具默认不暴露；仅在本轮存在存在不可见的上下文历史时解禁（有summary）
 _SESSION_TOOL_NAMES = frozenset({"get_historical_chat_messages"})
+_IMAGE_ATTACHMENT_TOOL_NAMES = frozenset({"load_image_attachment"})
 
 @dataclass(frozen=False)
 class ChatTurnContext:
@@ -73,13 +75,15 @@ class ChatTurnCoordinator:
             tool_registry: ToolRegistry,
             kafka_producer: KafkaProducerClient,
             skill_matcher: SkillMatcher,
+            oss_file_loader: OssFileLoader,
             agent_resolver: AgentResolver | None = None,
     ):
         self._memory = memory
         self._model_repo = model_repo
         self._session_repo = session_repo
         self._context_assembler = ChatContextAssembler(
-            message_repo=message_repo, session_repo=session_repo, hot_context_repo=hot_context_repo
+            message_repo=message_repo, session_repo=session_repo, hot_context_repo=hot_context_repo,
+            oss_file_loader=oss_file_loader
         )
         self._tool_registry = tool_registry
         self._query_loop_runtime = QueryLoopRuntime(
@@ -234,9 +238,12 @@ class ChatTurnCoordinator:
             )
 
         # 构建工具上下文
+        temp_attachments, resource_attachments = await self._session_repo.get_session_attachments(session_id, user_id)
+
         tool_context: dict[str, Any] = {
             "session_id": session_id,
             "user_id": user_id,
+            "temporary_attachment_refs": temp_attachments,
         }
 
         # 构建Skill视图
@@ -262,6 +269,12 @@ class ChatTurnCoordinator:
         if chat_turn_context.session_summary is not None:
             expose_tool_name_set.update(_SESSION_TOOL_NAMES)
 
+        if any(
+            msg.role == Role.USER and any(attachment.is_image for attachment in msg.attachments)
+            for msg in chat_history_record_messages
+        ):
+            expose_tool_name_set.update(_IMAGE_ATTACHMENT_TOOL_NAMES)
+
         # 构建工具视图
         # expose_tool_name_set 仅在有可展示 Skill 时解禁 Skill 工具
 
@@ -284,12 +297,9 @@ class ChatTurnCoordinator:
             client_tool_capabilities=client_tool_capabilities,
         )
 
-        # 对话中的全部附件
-        temp_attachments, resource_attachments = await self._session_repo.get_session_attachments(session_id, user_id)
-
         # 提示词组装
         # 将系统提示词、Mem0 检索到的事实、会话的历史摘要、前端上下文以及窗口内的未压缩明细消息组装成 LLM 所需的格式
-        chat_turn_context.messages_for_llm = self._context_assembler.assemble_prompt(
+        chat_turn_context.messages_for_llm = await self._context_assembler.assemble_prompt(
             session_id=session_id,
             user_query=user_query,
             system_prompt=chat_turn_context.agent_spec.system_prompt,  # 系统提示词
@@ -301,6 +311,7 @@ class ChatTurnCoordinator:
             temp_attachments=temp_attachments, # 对话中的全部临时附件
             resource_attachments=resource_attachments, # 对话中的全部资源附件
             user_defined_attachment_ids=user_defined_attachment_ids, # 用户指定的附件
+            support_vision=chat_turn_context.model_info.model.support_vision,
         )
 
         # 构造 chat_record_messages
@@ -309,14 +320,18 @@ class ChatTurnCoordinator:
             "relevant_facts": relevant_facts,
             "frontend_states": frontend_states or {},
             "available_skills_id": [skill.skill_id for skill in available_skills] or [],
-            "temp_attachments": temp_attachments or [],
-            "resource_attachments": resource_attachments or [],
             "user_defined_attachment_ids": user_defined_attachment_ids or []
         }
+        current_attachment_refs = self._context_assembler.build_message_attachment_refs(
+            temp_attachments=temp_attachments,
+            resource_attachments=resource_attachments,
+            user_defined_attachment_ids=user_defined_attachment_ids,
+        )
 
         chat_turn_context.chat_record_messages = [ChatMessage(
             session_id=session_id, role=Role.USER, content=user_query,
             metadata=user_message_metadata,
+            attachments=current_attachment_refs,
         )]
 
         chat_turn_context.token_usage = 0

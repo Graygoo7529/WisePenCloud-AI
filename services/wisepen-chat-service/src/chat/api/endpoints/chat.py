@@ -197,4 +197,3 @@ async def chat_cancel(
     await session_repo.get_session_for_user(req.session_id, user_id)
     await turn_stream_manager.cancel_turn(user_id=user_id, session_id=req.session_id)
     return R.success()
-

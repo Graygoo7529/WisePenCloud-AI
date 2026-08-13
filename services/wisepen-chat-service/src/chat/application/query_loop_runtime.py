@@ -460,11 +460,7 @@ class QueryLoopRuntime:
                 # ChatMessage.content 只接受字符串；客户端工具结果可以是结构化对象。
                 tool_message_content = result.tool_output
                 if not isinstance(tool_message_content, str):
-                    tool_message_content = (
-                        ""
-                        if tool_message_content is None
-                        else json.dumps(tool_message_content, ensure_ascii=False, default=str)
-                    )
+                    tool_message_content = "" if tool_message_content is None else json.dumps(tool_message_content, ensure_ascii=False, default=str)
 
                 yield ToolOutputAvailableEvent(
                     call_id=result.tool_call_id,
@@ -477,6 +473,7 @@ class QueryLoopRuntime:
                         tool_call_id=result.tool_call_id,
                         tool_name=result.tool_name,
                         content=tool_message_content,
+                        imgs=result.images,
                         persisted_output_placeholder=result.persisted_output_placeholder,
                     )
                 )
