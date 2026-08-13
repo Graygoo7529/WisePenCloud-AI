@@ -122,15 +122,18 @@ class ChatTurnCoordinator:
             session_summary=suspended_chat.context.session_summary,
             windowed_history_messages=suspended_chat.context.windowed_history_messages,
             tool_scope=tool_scope,
-            messages_for_llm=suspended_chat.context.messages_for_llm,
-            chat_record_messages=suspended_chat.context.chat_record_messages,
-            token_usage=suspended_chat.context.token_usage
+            # messages_for_llm 已包含挂起前的 assistant 工具调用，恢复时直接续接该上下文。
+            messages_for_llm=list(suspended_chat.context.messages_for_llm),
+            # 挂起前的消息和 token 由首次批次处理；恢复批次只记录新增工具结果和回复。
+            chat_record_messages=[],
+            token_usage=0,
         )
 
         async for event in self.query_llm(
             chat_turn_context=chat_turn_context,
             client_tool_results=client_tool_results,
             tool_approval_status=tool_approval_status,
+            start_iteration=suspended_chat.context.turn_suspension.iteration,
             cancel_requested=cancel_requested,
         ):
             yield event
@@ -331,6 +334,7 @@ class ChatTurnCoordinator:
             chat_turn_context: ChatTurnContext,
             client_tool_results: list[ClientToolResult] | None,
             tool_approval_status: List[ToolApprovalStatus] | None,
+            start_iteration: int = 0,
             cancel_requested: Callable[[], Awaitable[bool]] | None = None,
     ):
         # 流式推理
@@ -341,6 +345,7 @@ class ChatTurnCoordinator:
                 session_id=chat_turn_context.session_id,
                 agent_max_iterations=chat_turn_context.agent_spec.agent_max_iterations,
                 model_info=chat_turn_context.model_info,
+                start_iteration=start_iteration,
                 client_tool_results=client_tool_results,
                 tool_approval_status=tool_approval_status,
                 cancel_requested=cancel_requested,
