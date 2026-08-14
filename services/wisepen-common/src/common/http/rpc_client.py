@@ -74,33 +74,69 @@ class RpcClient:
         """
         发起到内部服务的 HTTP 调用并解包
         """
+        resp = await self.request_raw(
+            method,
+            service_name,
+            path,
+            params=params,
+            json=json,
+            headers=headers,
+            timeout=timeout,
+        )
+        try:
+            body = resp.json()
+        except Exception as e:
+            raise RpcError(
+                service_name=service_name,
+                path=path,
+                status=resp.status_code,
+                msg=f"non-json body: {resp.text[:200]}",
+                cause=e,
+            ) from e
+
+        if not isinstance(body, dict) or "code" not in body:
+            raise RpcError(
+                service_name=service_name,
+                path=path,
+                status=resp.status_code,
+                msg="response is not R<T> shape",
+            )
+
+        code = int(body.get("code"))
+        msg = body.get("msg")
+        if code == _R_SUCCESS_CODE:
+            return body.get("data")
+
+        raise RpcError(
+            service_name=service_name,
+            path=path,
+            status=resp.status_code,
+            code=code,
+            msg=msg,
+        )
+
+    async def request_raw(
+        self,
+        method: str,
+        service_name: str,
+        path: str,
+        *,
+        params: Optional[Mapping[str, Any]] = None,
+        json: Any = None,
+        headers: Optional[Mapping[str, str]] = None,
+        timeout: Optional[float] = None,
+    ) -> httpx.Response:
+        """
+        发起到内部服务的 HTTP 调用并返回原始响应。
+        """
         attempts = self._retries + 1
         tried_instances: set[str] = set()
 
         last_status: Optional[int] = None
-        last_code: Optional[int] = None
         last_msg: Optional[str] = None
         last_exc: Optional[BaseException] = None
 
-        merged_headers: Dict[str, str] = {
-            SecurityConstants.HEADER_FROM_SOURCE: self._from_source_secret,
-        }
-        if headers:
-            merged_headers.update({k: v for k, v in headers.items()})
-
-        user_id = SecurityContextHolder.get_user_id()
-        if user_id:
-            merged_headers[SecurityConstants.HEADER_USER_ID] = user_id
-            merged_headers[SecurityConstants.HEADER_IDENTITY_TYPE] = str(SecurityContextHolder.get_identity_type().code)
-            merged_headers[SecurityConstants.HEADER_GROUP_ROLE_MAP] = jsonlib.dumps({
-                str(group_id): role.code for group_id, role in SecurityContextHolder.get_group_role_map().items()
-            }, ensure_ascii=False)
-
-        # 传递 developer 头
-        developer = GrayContextHolder.get_developer_tag()
-        if developer:
-            merged_headers[CommonConstants.GRAY_HEADER_DEV_KEY] = developer
-
+        merged_headers = self._build_headers(headers)
         req_timeout = httpx.Timeout(timeout) if timeout is not None else None
 
         for attempt in range(attempts):
@@ -140,25 +176,7 @@ class RpcClient:
                     )
                     continue  # 5xx 换实例重试
 
-                # 非 5xx 就尝试解 R<T>；4xx / 200 失败都直接不重试
-                try:
-                    body = resp.json()
-                except Exception as e:
-                    last_msg = f"non-json body: {resp.text[:200]}"
-                    last_exc = e
-                    break
-
-                if not isinstance(body, dict) or "code" not in body:
-                    last_msg = "response is not R<T> shape"
-                    break
-
-                last_code = int(body.get("code"))
-                last_msg = body.get("msg")
-                if last_code == _R_SUCCESS_CODE:
-                    return body.get("data")
-
-                # 业务错误不做跨实例重试
-                break
+                return resp
 
             except (httpx.ConnectError, httpx.ConnectTimeout, httpx.ReadTimeout, httpx.RemoteProtocolError) as e:
                 last_exc = e
@@ -182,7 +200,27 @@ class RpcClient:
             service_name=service_name,
             path=path,
             status=last_status,
-            code=last_code,
             msg=last_msg,
             cause=last_exc,
         )
+
+    def _build_headers(self, headers: Optional[Mapping[str, str]]) -> Dict[str, str]:
+        merged_headers: Dict[str, str] = {
+            SecurityConstants.HEADER_FROM_SOURCE: self._from_source_secret,
+        }
+        if headers:
+            merged_headers.update({k: v for k, v in headers.items()})
+
+        user_id = SecurityContextHolder.get_user_id()
+        if user_id:
+            merged_headers[SecurityConstants.HEADER_USER_ID] = user_id
+            merged_headers[SecurityConstants.HEADER_IDENTITY_TYPE] = str(SecurityContextHolder.get_identity_type().code)
+            merged_headers[SecurityConstants.HEADER_GROUP_ROLE_MAP] = jsonlib.dumps({
+                str(group_id): role.code for group_id, role in SecurityContextHolder.get_group_role_map().items()
+            }, ensure_ascii=False)
+
+        # 传递 developer 头
+        developer = GrayContextHolder.get_developer_tag()
+        if developer:
+            merged_headers[CommonConstants.GRAY_HEADER_DEV_KEY] = developer
+        return merged_headers

@@ -33,7 +33,8 @@ os.environ["NO_PROXY"] = no_proxy
 
 
 mcp_server = build_mcp_server(
-    ai_asset_client=container.ai_asset_client()
+    ai_asset_client=container.ai_asset_client(),
+    note_collab_client=container.note_collab_client(),
 )
 mcp_app = mcp_server.streamable_http_app()
 

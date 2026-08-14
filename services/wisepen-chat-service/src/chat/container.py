@@ -34,6 +34,7 @@ from chat.core.persistence import (
 )
 from chat.domain.repositories import ToolConfigRepository
 from chat.application.chat_turn_coordinator import ChatTurnCoordinator
+from chat.application.chat_turn_tool_policy import ChatTurnToolPolicyBuilder
 from chat.application.chat_turn_stream_manager import ChatTurnStreamManager
 from chat.application.agents import (
     DefaultAgentResolver,
@@ -207,6 +208,10 @@ class Container(containers.DeclarativeContainer):
         DefaultSkillMatcher,
         ai_asset_client=ai_asset_client,
     )
+    chat_turn_tool_policy_builder = providers.Singleton(
+        ChatTurnToolPolicyBuilder,
+        skill_matcher=skill_matcher,
+    )
     agent_resolver = providers.Singleton(DefaultAgentResolver)
     kafka_producer = providers.Singleton(
         KafkaProducerClient,
@@ -296,7 +301,7 @@ class Container(containers.DeclarativeContainer):
         tool_registry=tool_registry,
         tool_dispatcher=tool_dispatcher,
         kafka_producer=kafka_producer,
-        skill_matcher=skill_matcher,
+        tool_policy_builder=chat_turn_tool_policy_builder,
         suspended_chat_repo=suspended_chat_repo,
         agent_resolver=agent_resolver,
         oss_file_loader=oss_file_loader,

@@ -316,7 +316,7 @@ async def get_user_mcp_server(
     user_id: str = Depends(require_login),
     mcp_server_config_repo: McpServerConfigRepository = Depends(Provide[Container.mcp_server_config_repo]),
 ):
-    entity = await mcp_server_config_repo.get_server_config(user_id, req.server_id)
+    entity = await mcp_server_config_repo.get_server_config(user_id, server_id)
     if entity is None:
         raise ServiceException(ChatErrorCode.TOOL_NOT_FOUND)
     return R.success(data=UserMcpServerResponse(

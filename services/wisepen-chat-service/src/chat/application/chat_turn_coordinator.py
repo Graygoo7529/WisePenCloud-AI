@@ -20,6 +20,7 @@ from chat.domain.repositories import SessionRepository, MessageRepository, HotCo
     ProviderRepository, SuspendedChatRepository
 from common.core.exceptions import ServiceException
 from chat.application.chat_context_assembler import ChatContextAssembler, WindowedMessages
+from chat.application.chat_turn_tool_policy import ChatTurnToolPolicyBuilder
 from chat.application.query_loop_runtime import QueryLoopRuntime
 from chat.application.agents import (
     AgentResolver,
@@ -28,19 +29,12 @@ from chat.application.agents import (
 from chat.application.events import StepFinishEvent, ErrorEvent
 from chat.api.vercel_sse_mapper import to_vercel_sse
 from chat.application.chat_turn_finalizer import ChatTurnFinalizer
-from chat.application.tools.skill_tools.utils.skill_matcher import SkillMatcher
 from chat.application.tools.core import ToolRegistry
 from chat.application.tools.core.execution.dispatcher import ToolDispatcher
 from chat.application.tools.client_tools import ClientToolCapability
 from chat.application.tools.core.definition import ClientToolResult, ToolApprovalStatus
 from common.kafka.producer import KafkaProducerClient
 
-
-# Skill 工具默认不暴露；仅在本轮存在可展示 Skill 时整体解禁
-_SKILL_TOOL_NAMES = frozenset({"load_skill", "load_skill_asset"})
-# Session 工具默认不暴露；仅在本轮存在存在不可见的上下文历史时解禁（有summary）
-_SESSION_TOOL_NAMES = frozenset({"get_historical_chat_messages"})
-_IMAGE_ATTACHMENT_TOOL_NAMES = frozenset({"load_image_attachment"})
 
 @dataclass(frozen=False)
 class ChatTurnContext:
@@ -76,7 +70,7 @@ class ChatTurnCoordinator:
             tool_registry: ToolRegistry,
             tool_dispatcher: ToolDispatcher,
             kafka_producer: KafkaProducerClient,
-            skill_matcher: SkillMatcher,
+            tool_policy_builder: ChatTurnToolPolicyBuilder,
             oss_file_loader: OssFileLoader,
             agent_resolver: AgentResolver | None = None,
     ):
@@ -101,7 +95,7 @@ class ChatTurnCoordinator:
             provider_repo=provider_repo,
             kafka_producer=kafka_producer
         )
-        self._skill_matcher = skill_matcher
+        self._tool_policy_builder = tool_policy_builder
         self._agent_resolver = agent_resolver or DefaultAgentResolver()
 
         self._suspended_chat_repo = suspended_chat_repo
@@ -240,62 +234,37 @@ class ChatTurnCoordinator:
                 low_watermark_ratio=memory_policy.low_watermark_ratio,
             )
 
-        # 构建工具上下文
         temp_attachments, resource_attachments = await self._session_repo.get_session_attachments(session_id, user_id)
 
-        tool_context: dict[str, Any] = {
-            "session_id": session_id,
-            "user_id": user_id,
-            "temporary_attachment_refs": temp_attachments,
-        }
+        # 构建本轮可用的工具和Skill
 
-        # 构建Skill视图
-        # 返回本轮可展示给 LLM 的 Skill metadata，由 LLM 判断是否加载
-        available_skills = []
-        if tool_and_skill_policy.enable_use_tool and tool_and_skill_policy.enable_use_skill:
-            # 若用户指定了 user_defined_on_demand_skill_ids，则覆盖 agent 预设的 on_demand_skill_ids
-            on_demand_skill_ids = (user_defined_on_demand_skill_ids if user_defined_on_demand_skill_ids is not None else tool_and_skill_policy.on_demand_skill_ids) or set()
-            # 构建 available_skills
-            available_skills = await self._skill_matcher.match(
-                on_demand_skill_ids=on_demand_skill_ids,
-                user_query=user_query,
-                skill_match_top_k=tool_and_skill_policy.skill_match_top_k,
-            )
-
-        expose_tool_name_set = set()
-        if available_skills:
-            expose_tool_name_set.update(_SKILL_TOOL_NAMES)
-            # allowed_skill_ids 表示本轮展示给 LLM 的 Skill 白名单，工具执行前仍会校验
-            tool_context["allowed_skill_ids"] = [s.skill_id for s in available_skills]
-
-        # 如有压缩，则暴露会话相关工具（例如召回被压缩的上下文）
-        if chat_turn_context.session_summary is not None:
-            expose_tool_name_set.update(_SESSION_TOOL_NAMES)
-
-        if any(
+        has_history_image_record = any(
             msg.role == Role.USER and any(attachment.is_image for attachment in msg.attachments)
             for msg in chat_history_record_messages
-        ):
-            expose_tool_name_set.update(_IMAGE_ATTACHMENT_TOOL_NAMES)
+        )
+        has_session_summary = chat_turn_context.session_summary is not None
 
-        # 构建工具视图
-        # expose_tool_name_set 仅在有可展示 Skill 时解禁 Skill 工具
-
-        if not tool_and_skill_policy.enable_use_tool:
-            # 若不启用Tool，则allow_tool_name_set为空
-            allow_tool_name_set:Set[str] = set()
-        else:
-            # 若用户指定了 user_defined_allow_tool_names，则覆盖 agent 预设的 allow_tool_names
-            allow_tool_name_set = user_defined_allow_tool_names or tool_and_skill_policy.allow_tool_names or None
-
-        # 若用户指定了 user_defined_deny_tool_names，则覆盖 agent 预设的 deny_tool_names
-        deny_tool_name_set = user_defined_deny_tool_names or tool_and_skill_policy.deny_tool_names or None
+        tool_policy = await self._tool_policy_builder.build(
+            user_id=user_id,
+            session_id=session_id,
+            tool_and_skill_policy=tool_and_skill_policy,
+            user_query=user_query,
+            frontend_states=frontend_states,
+            has_session_summary=has_session_summary,
+            has_history_image_record=has_history_image_record,
+            temporary_attachment_refs=temp_attachments,
+            user_defined_allow_tool_names=user_defined_allow_tool_names,
+            user_defined_deny_tool_names=user_defined_deny_tool_names,
+            user_defined_on_demand_skill_ids=user_defined_on_demand_skill_ids,
+            user_defined_force_enabled_skill_ids=user_defined_force_enabled_skill_ids,
+        )
+        available_skills = tool_policy.available_skills
 
         chat_turn_context.tool_scope = await self._tool_registry.derive(
-            tool_context=tool_context,
-            expose_tool_name_set=expose_tool_name_set,
-            allow_tool_name_set=allow_tool_name_set,
-            deny_tool_name_set=deny_tool_name_set,
+            tool_context=tool_policy.tool_context,
+            expose_tool_name_set=tool_policy.expose_tool_name_set,
+            allow_tool_name_set=tool_policy.allow_tool_name_set,
+            deny_tool_name_set=tool_policy.deny_tool_name_set,
             user_id=user_id,
             client_tool_capabilities=client_tool_capabilities,
         )

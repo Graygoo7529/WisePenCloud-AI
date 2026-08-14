@@ -91,6 +91,32 @@ _SYSTEM_TOOL_CONFIGS: List[dict[str, Any]] = [{
         ),
         "failure_reason": "Skill Draft Asset Upload Failed",
     },
+    # AI Note
+    {
+        "tool_name": "read_current_note_for_edit",
+        "policy": ToolPolicy(
+            expose_by_default=False,
+            risk_level=ToolRiskLevel.LOW,
+            timeout_seconds=10.0,
+            persist_output=True,
+            required_context_keys=("allowed_skill_ids",),
+            required_allowed_builtin_skill_ids=("builtin:current-note-editor",),
+            max_output_chars=settings.TOOL_RESULT_MAX_CHARS,
+        ),
+        "failure_reason": "Current Note Read Failed",
+    }, {
+        "tool_name": "apply_current_note_edits",
+        "policy": ToolPolicy(
+            expose_by_default=False,
+            risk_level=ToolRiskLevel.MEDIUM,
+            timeout_seconds=15.0,
+            persist_output=True,
+            required_context_keys=("allowed_skill_ids",),
+            required_allowed_builtin_skill_ids=("builtin:current-note-editor",),
+            max_output_chars=settings.TOOL_RESULT_MAX_CHARS,
+        ),
+        "failure_reason": "Current Note Edit Apply Failed",
+    },
     # Web Search Tools
     {
         "tool_name": "platform_search",
