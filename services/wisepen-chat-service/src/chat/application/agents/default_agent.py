@@ -42,11 +42,10 @@ def build_default_agent() -> Agent:
             ),
             tool_and_skill_policy=AgentToolAndSkillPolicy(
                 enable_use_tool=True,
-                allow_tool_names=None,
-                deny_tool_names=None,
+                tool_selection_default_enabled=True,
+                tool_selection_overrides={},
                 enable_use_skill=True,
                 on_demand_skill_ids=None,
-                force_enabled_skill_ids=None,
                 skill_match_top_k=settings.SKILL_MATCH_TOP_K,
             ),
             memory_policy=AgentMemoryPolicy(

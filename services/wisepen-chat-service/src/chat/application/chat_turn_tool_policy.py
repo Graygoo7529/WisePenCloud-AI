@@ -21,8 +21,8 @@ class ChatTurnToolPolicyResult:
     available_skills: list[SkillMeta] = field(default_factory=list)
     tool_context: dict[str, Any] = field(default_factory=dict)
     expose_tool_name_set: set[str] = field(default_factory=set)
-    allow_tool_name_set: set[str] | None = None
-    deny_tool_name_set: set[str] | None = None
+    tool_selection_default_enabled: bool = True
+    tool_selection_overrides: dict[str, bool] = field(default_factory=dict)
 
 
 class ChatTurnToolPolicyBuilder:
@@ -40,10 +40,9 @@ class ChatTurnToolPolicyBuilder:
         session_id: str,
         user_id: str,
         temporary_attachment_refs: Any,
-        user_defined_allow_tool_names: Optional[Set[str]],
-        user_defined_deny_tool_names: Optional[Set[str]],
+        tool_selection_default_enabled: Optional[bool],
+        tool_selection_overrides: Optional[dict[str, bool]],
         user_defined_on_demand_skill_ids: Optional[Set[str]],
-        user_defined_force_enabled_skill_ids: Optional[Set[str]],
     ) -> ChatTurnToolPolicyResult:
         # 构建 Skill 视图：返回本轮可展示给 LLM 的 Skill metadata，由 LLM 判断是否加载
         available_skills: list[SkillMeta] = []
@@ -89,22 +88,20 @@ class ChatTurnToolPolicyBuilder:
             # 如历史上下文中有图片，则暴露图片附件读取工具
             expose_tool_name_set.update(_IMAGE_ATTACHMENT_TOOL_NAMES)
 
-        if not tool_and_skill_policy.enable_use_tool:
-            # 若不启用 Tool，则 allow_tool_name_set 为空，禁止所有工具
-            allow_tool_name_set: set[str] | None = set()
-        else:
-            # 若用户指定了 user_defined_allow_tool_names，则覆盖 agent 预设的 allow_tool_names
-            allow_tool_name_set = user_defined_allow_tool_names or tool_and_skill_policy.allow_tool_names or None
-
-        # 若用户指定了 user_defined_deny_tool_names，则覆盖 agent 预设的 deny_tool_names
-        deny_tool_name_set = user_defined_deny_tool_names or tool_and_skill_policy.deny_tool_names or None
-
         return ChatTurnToolPolicyResult(
             available_skills=available_skills,
             tool_context=tool_context,
             expose_tool_name_set=expose_tool_name_set,
-            allow_tool_name_set=allow_tool_name_set,
-            deny_tool_name_set=deny_tool_name_set,
+            tool_selection_default_enabled=(
+                tool_selection_default_enabled
+                if tool_selection_default_enabled is not None
+                else tool_and_skill_policy.tool_selection_default_enabled
+            ),
+            tool_selection_overrides=(
+                dict(tool_selection_overrides)
+                if tool_selection_overrides is not None
+                else dict(tool_and_skill_policy.tool_selection_overrides)
+            ),
         )
 
 

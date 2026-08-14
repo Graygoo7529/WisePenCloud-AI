@@ -156,10 +156,9 @@ class ChatTurnCoordinator:
             runtime_options: dict = None,
             frontend_states: Optional[List[Dict[str, Any]]] = None,
             user_defined_attachment_ids: Optional[List[str]] = None,
-            user_defined_allow_tool_names: Optional[Set[str]] = None,
-            user_defined_deny_tool_names: Optional[Set[str]] = None,
+            tool_selection_default_enabled: Optional[bool] = None,
+            tool_selection_overrides: Optional[Dict[str, bool]] = None,
             user_defined_on_demand_skill_ids: Optional[Set[str]] = None,
-            user_defined_force_enabled_skill_ids: Optional[Set[str]] = None,
             client_tool_capabilities: list[ClientToolCapability] | None = None,
             cancel_requested: Callable[[], Awaitable[bool]] | None = None,
     ):
@@ -253,18 +252,17 @@ class ChatTurnCoordinator:
             has_session_summary=has_session_summary,
             has_history_image_record=has_history_image_record,
             temporary_attachment_refs=temp_attachments,
-            user_defined_allow_tool_names=user_defined_allow_tool_names,
-            user_defined_deny_tool_names=user_defined_deny_tool_names,
+            tool_selection_default_enabled=tool_selection_default_enabled,
+            tool_selection_overrides=tool_selection_overrides,
             user_defined_on_demand_skill_ids=user_defined_on_demand_skill_ids,
-            user_defined_force_enabled_skill_ids=user_defined_force_enabled_skill_ids,
         )
         available_skills = tool_policy.available_skills
 
         chat_turn_context.tool_scope = await self._tool_registry.derive(
             tool_context=tool_policy.tool_context,
             expose_tool_name_set=tool_policy.expose_tool_name_set,
-            allow_tool_name_set=tool_policy.allow_tool_name_set,
-            deny_tool_name_set=tool_policy.deny_tool_name_set,
+            tool_selection_default_enabled=tool_policy.tool_selection_default_enabled,
+            tool_selection_overrides=tool_policy.tool_selection_overrides,
             user_id=user_id,
             client_tool_capabilities=client_tool_capabilities,
         )

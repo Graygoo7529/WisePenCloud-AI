@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from chat.application.tools.core.definition import Tool
+from chat.application.tools.core.definition import Tool, ToolSelectionMode
 from chat.application.tools.core.llm.renderer import schema_renderer
 from chat.application.tools.client_tools import ClientToolCapability, client_tool_from_capability
 from chat.domain.error_codes import ChatErrorCode
@@ -83,7 +83,7 @@ class ToolRegistry:
         """返回全局已注册工具的 schema。
 
         该方法仅用于诊断和测试。运行期 LLM 调用必须使用 ToolScope.schemas()，
-        确保已应用当前请求的 expose/allow/deny 过滤。
+        确保已应用当前请求的上下文和工具选择过滤。
         """
         return [schema_renderer(tool.definition.llm_spec) for tool in self._tools.values()]
 
@@ -99,27 +99,33 @@ class ToolRegistry:
                 system_tools[name] = tool
         return system_tools
 
-    # 推导当前工具
-    async def derive(
-        self,
-        *,
-        tool_context: dict[str, Any] | None = None,
-        expose_tool_name_set: set[str] | None = None,
-        allow_tool_name_set: set[str] | None = None,
-        deny_tool_name_set: set[str] | None = None,
-        client_tool_capabilities: list[ClientToolCapability] | None = None,
-        user_id: str,
-    ) -> ToolScope:
-        context = dict(tool_context or {})
-        expose_tool_name_set = expose_tool_name_set or set()
-        deny_tool_name_set = deny_tool_name_set or set()
-
+    async def available_tools(self, user_id: str) -> dict[str, Tool]:
         tools: dict[str, Tool] = await self.system_tools()
 
         # 收集用户配置的 MCP 工具
         if self._mcp_tool_catalog is not None:
             for name, tool in (await self._mcp_tool_catalog.load_user_mcp_tools(user_id)).items():
                 tools.setdefault(name, tool) # 用户 MCP 工具不覆盖已有工具
+
+        return tools
+
+    # 推导当前工具
+    async def derive(
+        self,
+        *,
+        tool_context: dict[str, Any] | None = None,
+        expose_tool_name_set: set[str] | None = None,
+        tool_selection_default_enabled: bool = True,
+        tool_selection_overrides: dict[str, bool] | None = None,
+        client_tool_capabilities: list[ClientToolCapability] | None = None,
+        user_id: str,
+    ) -> ToolScope:
+        context = dict(tool_context or {})
+        expose_tool_name_set = expose_tool_name_set or set()
+        tool_selection_overrides = dict(tool_selection_overrides or {})
+        client_tool_capabilities = list(client_tool_capabilities or [])
+
+        tools: dict[str, Tool] = await self.available_tools(user_id)
 
         # 构建前端工具
         for client_tool_capability in client_tool_capabilities:
@@ -142,20 +148,34 @@ class ToolRegistry:
             ):
                 continue
 
+            # 明确暴露的工具，用于暴露 expose_by_default 为 False 的工具
             explicitly_exposed = name in expose_tool_name_set
-            skill_exposed = (policy.required_allowed_builtin_skill_ids and
+            # 工具要求某个 builtin skill id，而本轮 allowed_skill_ids 满足它
+            skill_exposure_satisfaction = (policy.required_allowed_builtin_skill_ids and
                              set(policy.required_allowed_builtin_skill_ids).issubset(set(context.get("allowed_skill_ids") or [])))
 
+            if policy.selection_mode == ToolSelectionMode.CONTEXTUAL:
+                # 对于 CONTEXTUAL 工具而言，只要用户没有显示禁用，即启用
+                _is_tool_selected = tool_selection_overrides.get(name) is not False
+            else:
+                # 对于非 CONTEXTUAL 工具而言，受用户 tool_selection_default_enabled 和 tool_selection_overrides 的指定影响
+                _is_tool_selected = bool(tool_selection_overrides.get(name, tool_selection_default_enabled))
+
+            if not _is_tool_selected: # 未被选中，跳过
+                continue
+
+            if not skill_exposure_satisfaction: # 暴露的技能不满足工具要求
+                continue
+
+            # CONTEXTUAL 工具必须靠 explicitly_exposed 显式启用 或 加载了要求的 Skill
+            if policy.selection_mode == ToolSelectionMode.CONTEXTUAL:
+                if explicitly_exposed or skill_exposure_satisfaction: filtered_tools[name] = tool
+                continue
+
+            # USER_SELECTABLE 但 expose_by_default 为 False 的工具必须靠 explicitly_exposed 显式启用 或 加载了要求的 Skill
             if not policy.expose_by_default:
-                if explicitly_exposed or skill_exposed:
-                    filtered_tools[name] = tool
+                if explicitly_exposed or skill_exposure_satisfaction: filtered_tools[name] = tool
                 continue
-
-            if allow_tool_name_set is not None and name not in allow_tool_name_set:
-                continue
-            if policy.expose_by_default and name in deny_tool_name_set:
-                continue
-
             filtered_tools[name] = tool
 
         return ToolScope(

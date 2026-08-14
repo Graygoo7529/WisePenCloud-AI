@@ -8,6 +8,8 @@ from chat.application.tools.core import (
     ToolParametersSchema,
     ToolPolicy,
     ToolRiskLevel,
+    ToolSourceSpec,
+    ToolUISpec,
 )
 from chat.application.tools.core.mcp.mcp_client import McpClient, McpServerConnection
 from chat.application.tools.core.mcp.remote_tool import McpRemoteTool
@@ -90,6 +92,16 @@ class McpToolCatalog:
                             parameters_schema=parameters_schema,
                         ),
                         policy=policy,
+                        ui_spec=ToolUISpec(
+                            display_name=descriptor.name,
+                            description=tool_description or None,
+                        ),
+                        source_spec=ToolSourceSpec(
+                            type="user_mcp",
+                            server_id=config.server_id,
+                            server_display_name=config.display_name or None,
+                            remote_name=descriptor.name,
+                        ),
                         preflight_hooks=(),
                     ),
                     failure_reason="MCP Tool Execution Failed",

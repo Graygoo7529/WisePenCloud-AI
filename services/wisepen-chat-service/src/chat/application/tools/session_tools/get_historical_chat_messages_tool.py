@@ -8,6 +8,8 @@ from chat.application.tools.core import (
     ToolParametersSchema,
     ToolPolicy,
     ToolRiskLevel,
+    ToolSelectionMode,
+    ToolUISpec,
 )
 from chat.core.config.app_settings import settings
 from chat.domain.repositories import MessageRepository
@@ -60,11 +62,16 @@ class GetHistoricalChatMessagesTool:
             ),
             policy=ToolPolicy(
                 expose_by_default=False,
+                selection_mode=ToolSelectionMode.CONTEXTUAL,
                 persist_output=True,
                 risk_level=ToolRiskLevel.LOW,
                 required_context_keys=("session_id",),
                 timeout_seconds=5.0,
                 max_output_chars=settings.TOOL_RESULT_MAX_CHARS,
+            ),
+            ui_spec=ToolUISpec(
+                display_name="检索历史对话",
+                description="在上下文被压缩时检索当前会话的历史消息。不推荐禁用。",
             ),
         )
 

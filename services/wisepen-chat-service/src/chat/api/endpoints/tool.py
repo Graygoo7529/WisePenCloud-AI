@@ -1,4 +1,3 @@
-import re
 import uuid
 
 from dependency_injector.wiring import Provide, inject
@@ -17,7 +16,7 @@ from chat.api.schemas.tool import (
     UpsertUserMcpServerRequest,
     UserMcpServerResponse,
 )
-from chat.application.tools.core import Tool, ToolRegistry
+from chat.application.tools.core import Tool, ToolRegistry, ToolSelectionMode, ToolSourceSpec
 from chat.application.tools.core.mcp import McpToolCatalog
 from chat.container import Container
 from chat.core.config.app_settings import settings
@@ -35,13 +34,17 @@ router = APIRouter()
 def _build_tool_response(tool: Tool, entity: UserToolConfig | None) -> ToolResponse:
     definition = tool.definition
     config_spec = definition.config_spec
+    ui_spec = definition.ui_spec
     if config_spec is None:
         return ToolResponse(
             name=definition.llm_spec.name,
-            description=definition.llm_spec.description,
+            display_name=ui_spec.display_name if ui_spec is not None else definition.llm_spec.name.replace("_", " ").strip().title(),
+            description=ui_spec.description if ui_spec is not None and ui_spec.description is not None else definition.llm_spec.description,
+            selection_mode=definition.policy.selection_mode,
             requires_config=False,
             configured=True,
             enabled=True,
+            source=definition.source_spec,
         )
 
     # 检查用户是否有配置、必填项是否完整
@@ -49,17 +52,20 @@ def _build_tool_response(tool: Tool, entity: UserToolConfig | None) -> ToolRespo
     missing_keys: list[str] = []
     if entity is not None:
         for key in config_spec.required_keys:
-            source = entity.secret_config if key in config_spec.secret_keys else entity.config
-            if source.get(key) is None or (isinstance(source.get(key), str) and not source.get(key).strip()):
+            config_source = entity.secret_config if key in config_spec.secret_keys else entity.config
+            if config_source.get(key) is None or (isinstance(config_source.get(key), str) and not config_source.get(key).strip()):
                 missing_keys.append(key)
         configured = not missing_keys
 
     return ToolResponse(
         name=definition.llm_spec.name,
-        description=definition.llm_spec.description,
+        display_name=ui_spec.display_name if ui_spec is not None else definition.llm_spec.name.replace("_", " ").strip().title(),
+        description=ui_spec.description if ui_spec is not None and ui_spec.description is not None else definition.llm_spec.description,
+        selection_mode=definition.policy.selection_mode,
         requires_config=True,
         configured=configured,
         enabled=entity.enabled if entity is not None else True,
+        source=definition.source_spec,
         missing_config_keys=missing_keys,
         config_schema=dict(config_spec.schema),
         secret_fingerprints={
@@ -72,12 +78,12 @@ def _build_tool_response(tool: Tool, entity: UserToolConfig | None) -> ToolRespo
 @router.get(
     "/listUserTools",
     response_model=R[ListUserToolsResponse],
-    summary="查询用户 Tool",
+    summary="查询用户可选 Tool",
     description="""
-- 用途：为前端 Tool 配置页查询当前用户可管理的 Tool 及配置状态。
+- 用途：为前端 Tool 配置页查询当前用户可选择的 USER_SELECTABLE Tool 及配置状态。
 - 请求：无业务请求参数，用户身份来自请求上下文。
 - 约束：当前用户必须已登录。
-- 处理：遍历已注册 Tool，合并当前用户保存的 Tool 配置，计算是否需要配置、是否已配置、是否启用、缺失配置项、配置 schema 和密钥指纹；不返回密钥明文。
+- 处理：遍历已注册 Tool，合并当前用户保存的 Tool 配置，仅返回 selection_mode=USER_SELECTABLE 的 Tool，并计算是否需要配置、是否已配置、是否启用、缺失配置项、配置 schema 和密钥指纹；不返回密钥明文。
 - 失败：未登录 -> PermissionErrorCode.NOT_LOGIN。
 - 响应：返回当前用户的 Tool 列表及各 Tool 的配置状态。
 """,
@@ -90,7 +96,32 @@ async def list_user_tools(
 ):
     configs = await tool_config_repo.list_tool_configs(user_id)
     configs = { config.tool_name: config for config in configs}
-    tools = await tool_registry.system_tools()
+    tools = await tool_registry.available_tools(user_id)
+
+    return R.success(data=ListUserToolsResponse(
+        tools=[
+            _build_tool_response(tool, configs.get(name))
+            for name, tool in sorted(tools.items(), key=lambda item: item[0])
+            if tool.definition.policy.selection_mode == ToolSelectionMode.USER_SELECTABLE
+        ],
+    ))
+
+
+@router.get(
+    "/listAvailableTools",
+    response_model=R[ListUserToolsResponse],
+    summary="查询可用 Tool 元信息",
+    description="返回当前用户可见的系统 Tool、系统 MCP Tool 和用户 MCP Tool 元信息；包含用户可选工具和上下文触发工具。",
+)
+@inject
+async def list_available_tools(
+    user_id: str = Depends(require_login),
+    tool_registry: ToolRegistry = Depends(Provide[Container.tool_registry]),
+    tool_config_repo: ToolConfigRepository = Depends(Provide[Container.tool_config_repo]),
+):
+    configs = await tool_config_repo.list_tool_configs(user_id)
+    configs = {config.tool_name: config for config in configs}
+    tools = await tool_registry.available_tools(user_id)
 
     return R.success(data=ListUserToolsResponse(
         tools=[
@@ -371,7 +402,14 @@ async def preview_user_mcp_server(
         tools=[
             McpToolSnapshotResponse(
                 name=tool.name,
+                display_name=tool.name,
                 description=tool.description,
+                selection_mode=ToolSelectionMode.USER_SELECTABLE,
+                source=ToolSourceSpec(
+                    type="user_mcp",
+                    server_display_name=req.display_name or None,
+                    remote_name=tool.name,
+                ),
                 input_schema=dict(tool.input_schema or {}),
                 status=tool.status,
             )

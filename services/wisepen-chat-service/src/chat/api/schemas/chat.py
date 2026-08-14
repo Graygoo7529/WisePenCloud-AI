@@ -80,21 +80,17 @@ class ChatRequest(BaseModel):
         default=None,
         description="本轮用户点选的附件 ID 列表；用于在 prompt 中标记重点附件，附件主体仍来自会话已关联附件。",
     )
-    user_defined_allow_tool_names: Optional[Set[str]] = Field(
+    tool_selection_default_enabled: Optional[bool] = Field(
         default=None,
-        description="本轮工具白名单；传入时覆盖 Agent allow_tool_names，且仍受工具是否暴露和模型是否支持工具约束。",
+        description="本轮用户可选工具的默认启用状态；未传时沿用 Agent 配置。",
     )
-    user_defined_deny_tool_names: Optional[Set[str]] = Field(
+    tool_selection_overrides: Optional[Dict[str, bool]] = Field(
         default=None,
-        description="本轮工具黑名单；传入时覆盖 Agent deny_tool_names，用于隐藏默认暴露工具。",
+        description="本轮工具启用覆盖 Map；未传时沿用 Agent 配置，传空 Map 表示清空 Agent 覆盖；CONTEXTUAL 工具仅支持用 false 显式排除。",
     )
     user_defined_on_demand_skill_ids: Optional[Set[str]] = Field(
         default=None,
         description="本轮候选 Skill ID 集合；传入时覆盖 Agent on_demand_skill_ids，并由 Skill matcher 按 query 选择可展示 Skill metadata。",
-    )
-    user_defined_force_enabled_skill_ids: Optional[Set[str]] = Field(
-        default=None,
-        description="预留字段；当前入口接收并透传，但现有 coordinator 尚未消费该字段，不应依赖其强制启用 Skill。",
     )
     client_tool_capabilities: List[ClientToolCapability] = Field(
         default_factory=list,

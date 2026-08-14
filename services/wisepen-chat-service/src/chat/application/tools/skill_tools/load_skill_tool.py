@@ -13,6 +13,8 @@ from chat.application.tools.core import (
     ToolParametersSchema,
     ToolPolicy,
     ToolRiskLevel,
+    ToolSelectionMode,
+    ToolUISpec,
 )
 from chat.application.tools.skill_tools.common import AllowedSkillIdCheck, build_skill_output_placeholder, SkillPermissionCheck
 from chat.application.tools.skill_tools.utils.builtin_skills import get_builtin_skill, is_builtin_skill_id, read_builtin_skill_asset
@@ -55,12 +57,17 @@ class LoadSkillTool:
             ),
             policy=ToolPolicy(
                 expose_by_default=False,
+                selection_mode=ToolSelectionMode.CONTEXTUAL,
                 persist_output=False,
                 persisted_output_placeholder_factory=build_skill_output_placeholder,
                 risk_level=ToolRiskLevel.MEDIUM,
                 required_context_keys=("allowed_skill_ids",),
                 timeout_seconds=8.0,
                 max_output_chars=settings.TOOL_RESULT_MAX_CHARS,
+            ),
+            ui_spec=ToolUISpec(
+                display_name="加载技能说明",
+                description="按需加载当前可用 Skill 的 SKILL.md 说明。不推荐禁用。",
             ),
             preflight_hooks=(AllowedSkillIdCheck(), SkillPermissionCheck(resource_client)),
         )

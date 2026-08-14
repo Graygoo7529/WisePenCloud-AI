@@ -6,7 +6,7 @@ from chat.application.tools.core.definition import (
     ToolExecutionTarget,
     ToolLLMSpec,
     ToolParametersSchema,
-    ToolPolicy,
+    ToolPolicy, Tool,
 )
 
 
@@ -17,7 +17,7 @@ class ClientToolCapability:
     input_schema: dict[str, Any]
 
 
-class _ClientTool:
+class ClientTool(Tool):
     def __init__(self, capability: ClientToolCapability) -> None:
         self.capability = capability
         self._definition = ToolDefinition(
@@ -36,5 +36,5 @@ class _ClientTool:
     def definition(self) -> ToolDefinition:
         return self._definition
 
-def client_tool_from_capability(capability: ClientToolCapability) -> _ClientTool:
-    return _ClientTool(capability)
+def client_tool_from_capability(capability: ClientToolCapability) -> ClientTool:
+    return ClientTool(capability)

@@ -6,11 +6,11 @@ from typing import Any
 from mcp.types import CallToolResult
 
 from chat.application.tools.core.llm.renderer import normalize_json_value
-from chat.application.tools.core import ToolDefinition, ToolExecutionError, ToolOutput
+from chat.application.tools.core import ToolDefinition, ToolExecutionError, ToolOutput, Tool
 from chat.domain.entities import VisionImage
 
 
-class McpRemoteTool:
+class McpRemoteTool(Tool):
     def __init__(
         self,
         *,

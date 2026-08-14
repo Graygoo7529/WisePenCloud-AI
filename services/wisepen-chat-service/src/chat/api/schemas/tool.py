@@ -2,15 +2,19 @@ from typing import Any, Optional
 
 from pydantic import BaseModel, Field
 
+from chat.application.tools.core import ToolSelectionMode, ToolSourceSpec
 from chat.domain.entities.mcp_tool_server_config import McpToolStatus
 
 
 class ToolResponse(BaseModel):
     name: str
+    display_name: str
     description: str
+    selection_mode: ToolSelectionMode
     requires_config: bool
     configured: bool
     enabled: bool
+    source: Optional[ToolSourceSpec] = None
     missing_config_keys: list[str] = Field(default_factory=list)
     config_schema: dict[str, Any] = Field(default_factory=dict)
     secret_fingerprints: dict[str, str] = Field(default_factory=dict)
@@ -33,7 +37,10 @@ class DeleteUserToolConfigRequest(BaseModel):
 
 class McpToolSnapshotResponse(BaseModel):
     name: str
+    display_name: str
     description: str = ""
+    selection_mode: ToolSelectionMode = ToolSelectionMode.USER_SELECTABLE
+    source: Optional[ToolSourceResponse] = None
     input_schema: dict[str, Any] = Field(default_factory=dict)
     status: McpToolStatus = McpToolStatus.AVAILABLE
 

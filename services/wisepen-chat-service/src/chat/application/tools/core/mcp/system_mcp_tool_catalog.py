@@ -10,6 +10,8 @@ from chat.application.tools.core import (
     ToolParametersSchema,
     ToolPolicy,
     ToolRiskLevel,
+    ToolSelectionMode,
+    ToolUISpec,
 )
 from chat.application.tools.core.mcp.remote_tool import McpRemoteTool
 from chat.core.config.app_settings import settings
@@ -44,8 +46,10 @@ _WEB_SEARCH_POLICY = ToolPolicy(
 
 _SYSTEM_TOOL_CONFIGS: List[dict[str, Any]] = [{
         "tool_name": "create_skill_info",
+        "ui_spec": ToolUISpec(display_name="创建 Skill 信息", description="创建新的 Skill 草稿信息。"),
         "policy": ToolPolicy(
             expose_by_default=False,
+            selection_mode=ToolSelectionMode.CONTEXTUAL,
             risk_level=ToolRiskLevel.HIGH,
             timeout_seconds=15.0,
             persist_output=True,
@@ -56,8 +60,10 @@ _SYSTEM_TOOL_CONFIGS: List[dict[str, Any]] = [{
         "failure_reason": "Skill Info Create Failed",
     }, {
         "tool_name": "get_skill_info",
+        "ui_spec": ToolUISpec(display_name="读取 Skill 信息", description="读取 Skill 草稿信息。"),
         "policy": ToolPolicy(
             expose_by_default=False,
+            selection_mode=ToolSelectionMode.CONTEXTUAL,
             risk_level=ToolRiskLevel.LOW,
             timeout_seconds=15.0,
             persist_output=True,
@@ -68,8 +74,10 @@ _SYSTEM_TOOL_CONFIGS: List[dict[str, Any]] = [{
         "failure_reason": "Skill Info Load Failed",
     }, {
         "tool_name": "update_skill_info",
+        "ui_spec": ToolUISpec(display_name="更新 Skill 信息", description="更新 Skill 草稿的名称和描述。"),
         "policy": ToolPolicy(
             expose_by_default=False,
+            selection_mode=ToolSelectionMode.CONTEXTUAL,
             risk_level=ToolRiskLevel.MEDIUM,
             timeout_seconds=15.0,
             persist_output=True,
@@ -80,8 +88,10 @@ _SYSTEM_TOOL_CONFIGS: List[dict[str, Any]] = [{
         "failure_reason": "Skill Info Update Failed",
     }, {
         "tool_name": "upload_skill_draft_asset",
+        "ui_spec": ToolUISpec(display_name="上传 Skill 资源", description="向 Skill 草稿上传文本资源。"),
         "policy": ToolPolicy(
             expose_by_default=False,
+            selection_mode=ToolSelectionMode.CONTEXTUAL,
             risk_level=ToolRiskLevel.MEDIUM,
             timeout_seconds=30.0,
             persist_output=True,
@@ -96,6 +106,7 @@ _SYSTEM_TOOL_CONFIGS: List[dict[str, Any]] = [{
         "tool_name": "read_current_note_for_edit",
         "policy": ToolPolicy(
             expose_by_default=False,
+            selection_mode=ToolSelectionMode.CONTEXTUAL,
             risk_level=ToolRiskLevel.LOW,
             timeout_seconds=10.0,
             persist_output=True,
@@ -103,11 +114,13 @@ _SYSTEM_TOOL_CONFIGS: List[dict[str, Any]] = [{
             required_allowed_builtin_skill_ids=("builtin:current-note-editor",),
             max_output_chars=settings.TOOL_RESULT_MAX_CHARS,
         ),
+        "ui_spec": ToolUISpec(display_name="读取当前笔记", description="读取当前打开笔记的编辑上下文。"),
         "failure_reason": "Current Note Read Failed",
     }, {
         "tool_name": "apply_current_note_edits",
         "policy": ToolPolicy(
             expose_by_default=False,
+            selection_mode=ToolSelectionMode.CONTEXTUAL,
             risk_level=ToolRiskLevel.MEDIUM,
             timeout_seconds=15.0,
             persist_output=True,
@@ -115,40 +128,48 @@ _SYSTEM_TOOL_CONFIGS: List[dict[str, Any]] = [{
             required_allowed_builtin_skill_ids=("builtin:current-note-editor",),
             max_output_chars=settings.TOOL_RESULT_MAX_CHARS,
         ),
+        "ui_spec": ToolUISpec(display_name="应用当前笔记编辑", description="将结构化编辑建议应用到当前打开笔记。"),
         "failure_reason": "Current Note Edit Apply Failed",
     },
     # Web Search Tools
     {
-        "tool_name": "platform_search",
+        "tool_name": "default_web_search",
+        "ui_spec": ToolUISpec(display_name="默认 Web 搜索"),
         "policy": _WEB_SEARCH_POLICY,
-        "failure_reason": "Platform Search Failed",
+        "failure_reason": "Default Web Search Failed",
     },{
         "tool_name": "exa_search",
+        "ui_spec": ToolUISpec(display_name="Exa 搜索"),
         "policy": _WEB_SEARCH_POLICY,
         "config_spec": _WEB_SEARCH_API_KEY_CONFIG,
         "failure_reason": "Exa Search Failed",
     },{
         "tool_name": "tavily_search",
+        "ui_spec": ToolUISpec(display_name="Tavily 搜索"),
         "policy": _WEB_SEARCH_POLICY,
         "config_spec": _WEB_SEARCH_API_KEY_CONFIG,
         "failure_reason": "Tavily Search Failed",
     },{
         "tool_name": "anysearch_search",
+        "ui_spec": ToolUISpec(display_name="AnySearch 搜索"),
         "policy": _WEB_SEARCH_POLICY,
         "config_spec": _WEB_SEARCH_API_KEY_CONFIG,
         "failure_reason": "AnySearch Search Failed",
     },{
         "tool_name": "baidu_qianfan_search",
+        "ui_spec": ToolUISpec(display_name="百度千帆搜索"),
         "policy": _WEB_SEARCH_POLICY,
         "config_spec": _WEB_SEARCH_API_KEY_CONFIG,
         "failure_reason": "Baidu Qianfan Search Failed",
     },{
         "tool_name": "tinyfish_search",
+        "ui_spec": ToolUISpec(display_name="TinyFish 搜索"),
         "policy": _WEB_SEARCH_POLICY,
         "config_spec": _WEB_SEARCH_API_KEY_CONFIG,
         "failure_reason": "TinyFish Search Failed",
     },{
         "tool_name": "firecrawl_search",
+        "ui_spec": ToolUISpec(display_name="Firecrawl 搜索"),
         "policy": _WEB_SEARCH_POLICY,
         "config_spec": _WEB_SEARCH_API_KEY_CONFIG,
         "failure_reason": "Firecrawl Search Failed",
@@ -200,6 +221,7 @@ class SystemMcpToolCatalog:
                         parameters_schema=parameters_schema,
                     ),
                     policy=overlay["policy"],
+                    ui_spec=overlay.get("ui_spec"),
                     config_spec=overlay.get("config_spec"),
                     preflight_hooks=(),
                 ),

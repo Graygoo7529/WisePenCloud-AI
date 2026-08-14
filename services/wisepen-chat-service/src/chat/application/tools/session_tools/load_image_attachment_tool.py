@@ -9,6 +9,8 @@ from chat.application.tools.core import (
     ToolParametersSchema,
     ToolPolicy,
     ToolRiskLevel,
+    ToolSelectionMode,
+    ToolUISpec,
 )
 from chat.core.config.app_settings import settings
 from chat.core.providers import OssFileLoader
@@ -46,11 +48,16 @@ class LoadImageAttachmentTool:
             ),
             policy=ToolPolicy(
                 expose_by_default=False,
+                selection_mode=ToolSelectionMode.CONTEXTUAL,
                 persist_output=True,
                 risk_level=ToolRiskLevel.LOW,
                 required_context_keys=("session_id", "temporary_attachment_refs"),
                 timeout_seconds=10.0,
                 max_output_chars=settings.TOOL_RESULT_MAX_CHARS,
+            ),
+            ui_spec=ToolUISpec(
+                display_name="加载会话历史图片",
+                description="在需要查看会话历史中被压缩的图片时加载图片文件。不推荐禁用。",
             ),
         )
 

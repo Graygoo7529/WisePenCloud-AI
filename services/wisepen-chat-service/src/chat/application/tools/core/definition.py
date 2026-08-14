@@ -35,6 +35,10 @@ class ToolExecutionTarget(StrEnum):
     SERVER = "server"
     CLIENT = "client"
 
+class ToolSelectionMode(StrEnum):
+    USER_SELECTABLE = "user_selectable"
+    CONTEXTUAL = "contextual"
+
 @dataclass(frozen=True)
 class ToolParametersSchema:
     raw: dict[str, Any]
@@ -89,6 +93,18 @@ class ToolLLMSpec:
     parameters_schema: ToolParametersSchema
 
 @dataclass(frozen=True)
+class ToolUISpec:
+    display_name: str
+    description: str | None = None
+
+@dataclass(frozen=True)
+class ToolSourceSpec:
+    type: str = "system"
+    server_id: str | None = None
+    server_display_name: str | None = None
+    remote_name: str | None = None
+
+@dataclass(frozen=True)
 class ToolConfigSpec:
     schema: dict[str, Any] # 前端表单 schema
     required_keys: tuple[str, ...] = () # 哪些配置项必须有值这个 Tool 才可用
@@ -131,6 +147,7 @@ class ToolConfigSpec:
 class ToolPolicy:
     """工具策略"""
     expose_by_default: bool = False # 是否默认暴露给模型
+    selection_mode: ToolSelectionMode = ToolSelectionMode.USER_SELECTABLE # 前端选择模式
 
     timeout_seconds: float | None = None # 超时时间
     timeout_strategy: ToolTimeoutStrategy = ToolTimeoutStrategy.CANCEL_TASK # 超时后策略
@@ -152,6 +169,8 @@ class ToolPolicy:
 class ToolDefinition:
     llm_spec: ToolLLMSpec
     policy: ToolPolicy = field(default_factory=ToolPolicy)
+    ui_spec: ToolUISpec | None = None
+    source_spec: ToolSourceSpec = field(default_factory=ToolSourceSpec)
     config_spec: ToolConfigSpec | None = None
     preflight_hooks: tuple['ToolPreflightHook', ...] = ()
 

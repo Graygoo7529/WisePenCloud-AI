@@ -12,27 +12,25 @@ class AgentModelPolicy(BaseModel):
 class AgentToolAndSkillPolicy(BaseModel):
     # 是否允许使用工具
     enable_use_tool: bool = True
-    # 工具白名单/黑名单
-    allow_tool_names: Optional[Set[str]] = None
-    deny_tool_names: Optional[Set[str]] = None
+    # 用户可选工具默认是否启用
+    tool_selection_default_enabled: bool = True
+    # 用户可选工具启用覆盖；Contextual 工具仅允许用 False 显式排除
+    tool_selection_overrides: dict[str, bool] = Field(default_factory=dict)
     # 是否允许使用Skill
     enable_use_skill: bool = True
     # 候选 Skill
     on_demand_skill_ids: Optional[Set[str]] = None
-    # TODO:强制启用 Skill
-    force_enabled_skill_ids: Optional[Set[str]] = None
     # 匹配前Top-K
     skill_match_top_k: Optional[int] = Field(default=20, ge=0, lt=30)
 
     @model_validator(mode="after")
     def normalize_tool_and_skill_policy(self) -> "AgentToolAndSkillPolicy":
         if not self.enable_use_tool:
-            self.allow_tool_names = set()
-            self.deny_tool_names = None
+            self.tool_selection_default_enabled = False
+            self.tool_selection_overrides = {}
             self.enable_use_skill = False
         if not self.enable_use_skill:
             self.on_demand_skill_ids = None
-            self.force_enabled_skill_ids = None
         return self
 
 # 记忆策略

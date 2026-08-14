@@ -43,7 +43,7 @@ async def _turn_stream_generator(chat_gen):
     summary="发送流式对话",
     description="""
 - 用途：在指定会话中发起一轮 Chat Turn，用于把用户最新输入交给当前会话绑定的 Agent 编排执行，并以流式事件返回模型推理、工具调用和最终回复。
-- 请求：session_id 指定目标会话；query 是本轮用户输入；model 可选指定模型 ID，未传时使用 DEFAULT_MODEL_ID，若会话 Agent 的 model_policy 不允许请求覆盖则改用 Agent 默认模型；provider_id 可选指定该模型的一条 active Provider 映射，未传时选择首选映射；runtime_options 覆盖 Provider manifest 默认运行参数；frontend_states 会筛选未禁用且有值的前端状态写入应用上下文；user_defined_attachment_ids 仅用于标记本轮重点附件，实际可见附件仍来自会话已关联的临时附件和资源附件；allow/deny tool 与 on-demand skill 参数用于覆盖 Agent 的本轮工具和 Skill 可见性策略。
+- 请求：session_id 指定目标会话；query 是本轮用户输入；model 可选指定模型 ID，未传时使用 DEFAULT_MODEL_ID，若会话 Agent 的 model_policy 不允许请求覆盖则改用 Agent 默认模型；provider_id 可选指定该模型的一条 active Provider 映射，未传时选择首选映射；runtime_options 覆盖 Provider manifest 默认运行参数；frontend_states 会筛选未禁用且有值的前端状态写入应用上下文；user_defined_attachment_ids 仅用于标记本轮重点附件，实际可见附件仍来自会话已关联的临时附件和资源附件；tool_selection_default_enabled 与 tool_selection_overrides 控制用户可选工具，Contextual 工具由后端上下文决定且只能被 overrides 中的 false 排除；on-demand skill 参数用于覆盖 Agent 的本轮 Skill 候选。
 - 约束：当前用户必须已登录；query 和 session_id 不能为空；目标会话必须属于当前用户；model、provider_id 必须是合法 ObjectId；目标模型必须是 active 的用户模型或系统模型；provider_id 必须属于该模型的 active 映射；Provider 必须 active；runtime_options 必须符合目标 Provider 的 JSON Schema；工具、Skill、记忆和模型覆盖最终受会话 Agent 策略约束。
 - 处理：先校验会话归属，再读取会话绑定 Agent，没有绑定时使用默认 Agent；根据 Agent model_policy 解析最终模型、Provider、Provider 侧模型名和运行参数；按 Agent memory_policy 加载 Redis 热上下文，必要时从 MongoDB 回填，按配置召回长期记忆和会话摘要；按工具与 Skill 策略匹配本轮可展示 Skill、派生 ToolScope，并读取会话临时附件和资源附件；组装 system prompt、历史摘要、历史明细、长期记忆、前端状态、Skill metadata、附件清单和用户 query 后进入多步 ReAct 循环；循环中把 Provider 原生流转换为 AI SDK 6.x UIMessage Stream 事件，工具调用会先输出输入事件、并发执行工具，再输出工具结果并继续下一步模型推理；响应返回后通过 BackgroundTasks 发送 token 计费、追加 Redis 热上下文、按配置落 MongoDB、写入长期记忆、压缩摘要并在需要时自动生成标题。
 - 失败：未登录 -> PermissionErrorCode.NOT_LOGIN；query 或 session_id 为空 -> HTTP 400；会话不存在或不属于当前用户 -> ChatErrorCode.SESSION_NOT_FOUND；模型不存在、未启用或不可访问 -> ChatErrorCode.MODEL_NOT_FOUND；模型供应商映射不存在或未启用 -> ChatErrorCode.MODEL_MAPPING_NOT_FOUND；Provider 不存在或未启用 -> ChatErrorCode.PROVIDER_NOT_FOUND；Provider 类型无对应运行时适配器 -> ChatErrorCode.MODEL_PROVIDER_TYPE_UNSUPPORTED；runtime_options 不符合目标 Provider schema -> ChatErrorCode.MODEL_RUNTIME_OPTIONS_INVALID；上下文超过模型限制 -> ChatErrorCode.CONTEXT_LIMIT_EXCEEDED；大模型或 Provider 流式调用失败 -> ChatErrorCode.LLM_GENERATION_FAILED。
@@ -82,10 +82,9 @@ async def chat_completions(
             runtime_options=req.runtime_options,
             frontend_states=req.frontend_states,
             user_defined_attachment_ids=req.user_defined_attachment_ids,
-            user_defined_allow_tool_names=req.user_defined_allow_tool_names,
-            user_defined_deny_tool_names=req.user_defined_deny_tool_names,
+            tool_selection_default_enabled=req.tool_selection_default_enabled,
+            tool_selection_overrides=req.tool_selection_overrides,
             user_defined_on_demand_skill_ids=req.user_defined_on_demand_skill_ids,
-            user_defined_force_enabled_skill_ids=req.user_defined_force_enabled_skill_ids,
             client_tool_capabilities=[
                 ClientToolCapability(
                     name=item.name,
