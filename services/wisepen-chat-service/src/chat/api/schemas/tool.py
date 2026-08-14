@@ -40,7 +40,7 @@ class McpToolSnapshotResponse(BaseModel):
     display_name: str
     description: str = ""
     selection_mode: ToolSelectionMode = ToolSelectionMode.USER_SELECTABLE
-    source: Optional[ToolSourceResponse] = None
+    source: Optional[ToolSourceSpec] = None
     input_schema: dict[str, Any] = Field(default_factory=dict)
     status: McpToolStatus = McpToolStatus.AVAILABLE
 

@@ -8,6 +8,7 @@ authors = [
     { name = "Jiazheng Sun", email = "jzsun24@m.fudan.edu.cn" }
 ]
 dependencies = [
+    "ddgs",
     "fastapi",
     "pydantic",
     "pydantic-settings",

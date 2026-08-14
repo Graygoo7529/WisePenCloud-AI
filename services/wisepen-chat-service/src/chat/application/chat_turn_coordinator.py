@@ -303,6 +303,10 @@ class ChatTurnCoordinator:
             metadata=user_message_metadata,
             attachments=current_attachment_refs,
         )]
+        await self._turn_finalizer.persist_user_message(
+            chat_message=chat_turn_context.chat_record_messages[0],
+            memory_policy=memory_policy,
+        )
 
         chat_turn_context.token_usage = 0
         async for event in self.query_llm(

@@ -71,6 +71,24 @@ class ChatTurnFinalizer:
         except Exception as exc:
             error("chat token billing failed.", session_id=session_id, exc=exc)
 
+    async def persist_user_message(
+        self,
+        *,
+        chat_message: ChatMessage,
+        memory_policy: AgentMemoryPolicy,
+    ) -> None:
+        """在模型执行前持久化本轮第一条用户消息"""
+        if not memory_policy.enable_persistence_chat_memory:
+            return
+        try:
+            await self._fill_content_token_count([chat_message])
+            if chat_message.content:
+                chat_message.build_search_tokens()
+            await self.message_repo.save_messages([chat_message])
+        except Exception as e:
+            error("chat user message archive failed.", session_id=chat_message.session_id, exc=e)
+            raise ServiceException(ChatErrorCode.CHAT_MESSAGE_PERSIST_FAILED) from e
+
     async def send_token_billing(
         self,
         user_id: str,
@@ -136,10 +154,12 @@ class ChatTurnFinalizer:
         # MongoDB 落盘 (落占位符处理的消息内容)
         if memory_policy.enable_persistence_chat_memory:
             try:
-                for msg in chat_record_messages:
+                # 本轮第一条 user message 已在模型执行前持久化，这里只归档后续 assistant/tool 消息。
+                messages_for_archive = chat_record_messages[1:]
+                for msg in messages_for_archive:
                     if msg.content: msg.build_search_tokens() # 构建搜索向量 (缓解中文分词问题)
 
-                await self.message_repo.save_messages(chat_record_messages)
+                await self.message_repo.save_messages(messages_for_archive)
             except Exception as e:
                 error("chat record message archive failed.", session_id=session_id, exc=e)
                 raise ServiceException(ChatErrorCode.CHAT_MESSAGE_PERSIST_FAILED) from e
