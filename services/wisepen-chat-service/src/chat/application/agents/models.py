@@ -150,6 +150,7 @@ class Agent(BaseModel):
     source_type: str = ""
     version: int = 0
     version_status: str = ""
+    # 预留：Agent 资产清单尚未进入 Chat 使用链路。
     assets_manifest: List[AgentAssetMeta] = Field(default_factory=list)
     spec: AgentSpec
 

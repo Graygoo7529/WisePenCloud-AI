@@ -204,6 +204,7 @@ class Container(containers.DeclarativeContainer):
         cache_ttl_seconds=settings.OSS_CACHE_TTL_SECONDS,
         gc_interval_seconds=settings.OSS_CACHE_GC_INTERVAL_SECONDS,
     )
+    # 预留：Agent 资产尚未接入 Chat，保留独立加载器与磁盘缓存注册。
     agent_oss_file_loader = providers.Singleton(
         AgentOssFileLoader,
         file_storage_client=file_storage_client,

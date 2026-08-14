@@ -10,6 +10,7 @@ class AgentAssetUnavailableError(ValueError):
     pass
 
 
+# 预留：等待 Agent 资产按需读取能力接入 Chat Tool。
 class AgentAssetLoader:
     """Read a declared asset from an already resolved Agent version snapshot."""
 

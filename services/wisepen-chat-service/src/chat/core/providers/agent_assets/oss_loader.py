@@ -15,6 +15,7 @@ from common.logger import error, info, warn
 from chat.domain.interfaces.file_loader import FileLoader
 
 
+# 预留：Agent 资产尚未接入 Chat，先保留独立 OSS 下载与磁盘缓存实现。
 class AgentOssFileLoader(FileLoader):
     """
     经 wisepen-file-storage-service 颁发的预签名 URL 从 OSS 拉取 Agent Object

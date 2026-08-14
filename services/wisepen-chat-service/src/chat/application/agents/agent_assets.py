@@ -3,6 +3,7 @@ from typing import Any, Mapping
 from pydantic import BaseModel, Field
 
 
+# 预留：Agent 资产元数据目前仅映射 Java 版本包，尚未进入 Chat 使用链路。
 class AgentAssetMeta(BaseModel):
     """Agent version bundle asset metadata returned by Java AI Asset service."""
 
