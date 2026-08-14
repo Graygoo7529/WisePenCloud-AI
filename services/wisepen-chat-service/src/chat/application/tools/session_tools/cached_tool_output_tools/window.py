@@ -4,14 +4,14 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 
 from chat.application.tools.core.output_cache.cache_store import (
-    StoredToolContent,
-    ToolContentChunk,
+    StoredToolContent as StoredCachedToolOutput,
+    ToolContentChunk as CachedToolOutputChunk,
 )
 from common.utils.chunkers import SourceSpan, TextLocator
 
 
 @dataclass(slots=True)
-class ToolContentWindow:
+class CachedToolOutputWindow:
     text: str
     start_offset: int
     end_offset: int
@@ -23,7 +23,7 @@ class ToolContentWindow:
     metadata: dict[str, object] = field(default_factory=dict)
 
 
-class ToolContentWindowBuilder:
+class CachedToolOutputWindowBuilder:
     __slots__ = ("_char_budget",)
 
     def __init__(self, *, char_budget: int) -> None:
@@ -33,12 +33,12 @@ class ToolContentWindowBuilder:
 
     def build_range_window(
         self,
-        stored: StoredToolContent,
+        stored: StoredCachedToolOutput,
         *,
         start: int | None,
         end: int | None,
         char_budget: int | None = None,
-    ) -> ToolContentWindow:
+    ) -> CachedToolOutputWindow:
         # range 工具直接按原文偏移读取；负数偏移按 Python slice 语义从末尾回退。
         text_length = len(stored.text)
         normalized_start = _normalize_offset(start, text_length, default=0)
@@ -63,11 +63,11 @@ class ToolContentWindowBuilder:
 
     def build_source_window(
         self,
-        stored: StoredToolContent,
+        stored: StoredCachedToolOutput,
         *,
-        chunk: ToolContentChunk,
+        chunk: CachedToolOutputChunk,
         char_budget: int | None = None,
-    ) -> ToolContentWindow:
+    ) -> CachedToolOutputWindow:
         # semantic search 使用 chunk 的 source_spans 回读原文，避免把索引时的摘要文本当作来源。
         budget = self._resolve_budget(char_budget)
         fragments: list[str] = []
@@ -105,7 +105,7 @@ class ToolContentWindowBuilder:
 
         start = min((span.start_offset for span in included_spans), default=0)
         end = max((span.end_offset for span in included_spans), default=0)
-        return ToolContentWindow(
+        return CachedToolOutputWindow(
             text="\n\n".join(fragments),
             start_offset=start,
             end_offset=end,
@@ -125,19 +125,19 @@ class ToolContentWindowBuilder:
 
     def _continuous_window(
         self,
-        stored: StoredToolContent,
+        stored: StoredCachedToolOutput,
         *,
         start: int,
         end: int,
         truncated: bool,
-    ) -> ToolContentWindow:
+    ) -> CachedToolOutputWindow:
         # 连续窗口按偏移反查覆盖到的 page/section/anchor，便于后续精确读取。
         locators = [
             locator
             for locator in stored.locators
             if locator.start_offset < end and locator.end_offset > start
         ]
-        return ToolContentWindow(
+        return CachedToolOutputWindow(
             text=stored.text[start:end],
             start_offset=start,
             end_offset=end,

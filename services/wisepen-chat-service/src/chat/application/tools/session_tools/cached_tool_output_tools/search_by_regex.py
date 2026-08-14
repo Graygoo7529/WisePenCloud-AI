@@ -14,14 +14,15 @@ from chat.application.tools.core import (
     ToolParametersSchema,
     ToolPolicy,
     ToolRiskLevel,
+    ToolUISpec,
 )
 from chat.application.tools.core.output_cache.cache_store import (
-    StoredToolContent,
-    ToolContentStore,
+    StoredToolContent as StoredCachedToolOutput,
+    ToolContentStore as CachedToolOutputStore,
 )
 from chat.core.config.app_settings import settings
 
-from chat.application.tools.session_tools.tool_content_tools.window import ToolContentWindow, ToolContentWindowBuilder
+from chat.application.tools.session_tools.cached_tool_output_tools.window import CachedToolOutputWindow, CachedToolOutputWindowBuilder
 
 _MAX_REGEX_CHARS = 500
 _SEARCH_TIMEOUT_SECONDS = 5
@@ -34,7 +35,7 @@ _PARAMETERS_SCHEMA: dict[str, Any] = {
             "items": {"type": "string", "minLength": 1},
             "minItems": 1,
             "maxItems": 64,
-            "description": "One or more cnt_* ids from previous contents entries.",
+            "description": "One or more cached tool output content_id values returned in previous tool results.",
         },
         "pattern": {
             "type": "string",
@@ -46,7 +47,7 @@ _PARAMETERS_SCHEMA: dict[str, Any] = {
             "type": "integer",
             "default": 10,
             "minimum": 0,
-            "description": "Maximum matches returned across all content_ids.",
+            "description": "Maximum matches returned across all cached tool outputs.",
         },
         "context_chars": {
             "type": "integer",
@@ -63,38 +64,42 @@ _PARAMETERS_SCHEMA: dict[str, Any] = {
 
 
 @dataclass(slots=True)
-class ToolContentRegexSearchMatch:
+class CachedToolOutputSearchByRegexMatch:
     content_id: str
     match_start: int
     match_end: int
-    window: ToolContentWindow
+    window: CachedToolOutputWindow
 
 
 @dataclass(slots=True)
-class ToolContentRegexSearchResult:
-    matches: list[ToolContentRegexSearchMatch] = field(default_factory=list)
+class CachedToolOutputSearchByRegexResult:
+    matches: list[CachedToolOutputSearchByRegexMatch] = field(default_factory=list)
     budget_exhausted: bool = False
 
 
-class ToolContentRegexSearchTool:
+class CachedToolOutputSearchByRegexTool:
     __slots__ = ("_definition", "_store")
 
-    def __init__(self, *, store: ToolContentStore) -> None:
+    def __init__(self, *, store: CachedToolOutputStore) -> None:
         self._store = store
         self._definition = ToolDefinition(
             llm_spec=ToolLLMSpec(
-                name="tool_content_regex_search",
+                name="search_cached_tool_output_by_regex",
                 description=(
                     "Search complete cached source texts with a Python regular expression. "
                     "Use this for exact names, identifiers, citations, headings, URLs, or other "
                     "literal patterns, including matches that cross retrieval chunk boundaries. "
                     "Results include absolute match offsets and bounded source context. "
-                    "Use tool_content_semantic_search for meaning-based retrieval. Use read tools "
+                    "Use search_cached_tool_output_by_semantics for meaning-based retrieval. Use read tools "
                     "after you know the desired range, pages, or sections."
                 ),
                 parameters_schema=ToolParametersSchema(_PARAMETERS_SCHEMA),
             ),
             policy=_policy(),
+            ui_spec=ToolUISpec(
+                display_name="正则搜索缓存的工具输出",
+                description="在缓存工具输出全文中用正则表达式查找精确文本、编号、链接、标题或其他固定模式。",
+            ),
         )
 
     @property
@@ -106,7 +111,7 @@ class ToolContentRegexSearchTool:
         context: dict[str, Any],
         config: dict[str, Any] | None = None,
         **kwargs: Any,
-    ) -> ToolContentRegexSearchResult:
+    ) -> CachedToolOutputSearchByRegexResult:
         del config
         # pattern 为空直接视为调用错误；不要把空正则扩展成全文匹配。
         pattern = str(kwargs.get("pattern") or "")
@@ -141,7 +146,7 @@ class ToolContentRegexSearchTool:
                 )
                 if stored is not None:
                     stored_items.append(stored)
-            return await _regex_search(
+            return await _search_by_regex(
                 stored_items=stored_items,
                 pattern=pattern,
                 max_matches=max(int(kwargs.get("max_matches", 10)), 0),
@@ -153,32 +158,32 @@ class ToolContentRegexSearchTool:
             )
         except Exception as exc:
             raise ToolExecutionError(
-                reason="tool_content_regex_search_failed",
+                reason="search_cached_tool_output_by_regex_failed",
                 detail_reason=str(exc),
                 retryable=False,
             ) from exc
 
 
-async def _regex_search(
+async def _search_by_regex(
     *,
-    stored_items: Sequence[StoredToolContent],
+    stored_items: Sequence[StoredCachedToolOutput],
     pattern: str,
     max_matches: int,
     context_chars: int | None,
-) -> ToolContentRegexSearchResult:
+) -> CachedToolOutputSearchByRegexResult:
     if max_matches <= 0:
         # max_matches=0 是合法输入，用于主动禁止返回命中。
-        return ToolContentRegexSearchResult()
+        return CachedToolOutputSearchByRegexResult()
 
-    # regex 的窗口预算使用独立配置，不复用 read_range 的单窗口预算。
-    builder = ToolContentWindowBuilder(
+    # regex 的窗口预算使用独立配置，不复用 read_cached_tool_output_by_range 的单窗口预算。
+    builder = CachedToolOutputWindowBuilder(
         char_budget=settings.TOOL_CONTENT_REGEX_TOTAL_CHAR_BUDGET
     )
 
-    def scan_loaded() -> tuple[list[ToolContentRegexSearchMatch], bool]:
+    def scan_loaded() -> tuple[list[CachedToolOutputSearchByRegexMatch], bool]:
         # regex 搜索放到工作线程里执行，避免复杂表达式阻塞事件循环。
         compiled = regex.compile(pattern)
-        matches: list[ToolContentRegexSearchMatch] = []
+        matches: list[CachedToolOutputSearchByRegexMatch] = []
         remaining = settings.TOOL_CONTENT_REGEX_TOTAL_CHAR_BUDGET
         for stored in stored_items:
             try:
@@ -207,7 +212,7 @@ async def _regex_search(
                         char_budget=remaining,
                     )
                     matches.append(
-                        ToolContentRegexSearchMatch(
+                        CachedToolOutputSearchByRegexMatch(
                             content_id=stored.content_id,
                             match_start=matched.start(),
                             match_end=matched.end(),
@@ -225,7 +230,7 @@ async def _regex_search(
         return matches, False
 
     matches, budget_exhausted = await asyncio.to_thread(scan_loaded)
-    return ToolContentRegexSearchResult(
+    return CachedToolOutputSearchByRegexResult(
         matches=matches,
         budget_exhausted=budget_exhausted,
     )

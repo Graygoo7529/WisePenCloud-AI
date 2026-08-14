@@ -13,15 +13,16 @@ from chat.application.tools.core import (
     ToolParametersSchema,
     ToolPolicy,
     ToolRiskLevel,
+    ToolUISpec,
 )
 from chat.application.tools.core.output_cache.cache_store import (
-    StoredToolContent,
-    ToolContentChunk,
-    ToolContentStore,
+    StoredToolContent as StoredCachedToolOutput,
+    ToolContentChunk as CachedToolOutputChunk,
+    ToolContentStore as CachedToolOutputStore,
 )
 from chat.core.config.app_settings import settings
 
-from chat.application.tools.session_tools.tool_content_tools.window import ToolContentWindow, ToolContentWindowBuilder
+from chat.application.tools.session_tools.cached_tool_output_tools.window import CachedToolOutputWindow, CachedToolOutputWindowBuilder
 from common.utils.ranking import RankCandidate, RankQuery, RankRequest
 from common.utils.ranking import RankingPipeline
 from common.utils.ranking.fusion import WeightedRrfFusion
@@ -38,7 +39,7 @@ _PARAMETERS_SCHEMA: dict[str, Any] = {
             "items": {"type": "string", "minLength": 1},
             "minItems": 1,
             "maxItems": 64,
-            "description": "One or more cnt_* ids from previous contents entries.",
+            "description": "One or more cached tool output content_id values returned in previous tool results.",
         },
         "query": {
             "type": "string",
@@ -58,20 +59,20 @@ _PARAMETERS_SCHEMA: dict[str, Any] = {
 
 
 @dataclass(slots=True)
-class ToolContentSemanticSearchItem:
+class CachedToolOutputSearchBySemanticsItem:
     content_id: str
     rank: int
     score: float
     chunk_index: int
-    window: ToolContentWindow
+    window: CachedToolOutputWindow
 
 
 @dataclass(slots=True)
-class ToolContentSemanticSearchResult:
-    results: list[ToolContentSemanticSearchItem] = field(default_factory=list)
+class CachedToolOutputSearchBySemanticsResult:
+    results: list[CachedToolOutputSearchBySemanticsItem] = field(default_factory=list)
     budget_exhausted: bool = False
 
-def build_tool_content_semantic_search_pipeline() -> RankingPipeline:
+def build_cached_tool_output_search_by_semantics_pipeline() -> RankingPipeline:
     tokenizer = ThuLacRankingTokenizer()
     return RankingPipeline(
         scorers=(
@@ -90,30 +91,34 @@ def build_tool_content_semantic_search_pipeline() -> RankingPipeline:
         ),
     )
 
-class ToolContentSemanticSearchTool:
+class CachedToolOutputSearchBySemanticsTool:
     __slots__ = ("_definition", "_ranking_pipeline", "_store")
 
     def __init__(
         self,
         *,
-        store: ToolContentStore,
+        store: CachedToolOutputStore,
     ) -> None:
         self._store = store
-        self._ranking_pipeline = build_tool_content_semantic_search_pipeline()
+        self._ranking_pipeline = build_cached_tool_output_search_by_semantics_pipeline()
         self._definition = ToolDefinition(
             llm_spec=ToolLLMSpec(
-                name="tool_content_semantic_search",
+                name="search_cached_tool_output_by_semantics",
                 description=(
-                    "Search semantic chunks from one or more cached contents and return the most "
+                    "Search semantic chunks from one or more cached tool outputs and return the most "
                     "relevant source windows. Chunks follow Markdown section semantics rather than "
                     "physical page boundaries. Each result includes known page, section, and anchor "
                     "metadata for deterministic follow-up reads.\n\n"
-                    "Use tool_content_regex_search for exact patterns. Use read tools only after "
+                    "Use search_cached_tool_output_by_regex for exact patterns. Use read tools only after "
                     "you know the desired range, pages, or sections."
                 ),
                 parameters_schema=ToolParametersSchema(_PARAMETERS_SCHEMA),
             ),
             policy=_policy(),
+            ui_spec=ToolUISpec(
+                display_name="语义搜索缓存的工具输出",
+                description="按问题语义检索缓存工具输出中的相关片段，并返回可继续按页、章节或范围读取的上下文。",
+            ),
         )
 
     @property
@@ -125,7 +130,7 @@ class ToolContentSemanticSearchTool:
         context: dict[str, Any],
         config: dict[str, Any] | None = None,
         **kwargs: Any,
-    ) -> ToolContentSemanticSearchResult:
+    ) -> CachedToolOutputSearchBySemanticsResult:
         del config
         # semantic search 必须有自然语言查询，空查询无法构建排序请求。
         query = str(kwargs.get("query") or "").strip()
@@ -145,7 +150,7 @@ class ToolContentSemanticSearchTool:
                 )
                 if stored is not None:
                     stored_items.append(stored)
-            return await _semantic_search(
+            return await _search_by_semantics(
                 stored_items=stored_items,
                 query=query,
                 top_k=max(int(kwargs.get("top_k", 10)), 0),
@@ -153,21 +158,21 @@ class ToolContentSemanticSearchTool:
             )
         except Exception as exc:
             raise ToolExecutionError(
-                reason="tool_content_semantic_search_failed",
+                reason="search_cached_tool_output_by_semantics_failed",
                 detail_reason=str(exc),
                 retryable=False,
             ) from exc
 
 
-async def _semantic_search(
+async def _search_by_semantics(
     *,
-    stored_items: Sequence[StoredToolContent],
+    stored_items: Sequence[StoredCachedToolOutput],
     query: str,
     top_k: int,
     ranking_pipeline: RankingPipeline,
-) -> ToolContentSemanticSearchResult:
+) -> CachedToolOutputSearchBySemanticsResult:
     candidates: list[RankCandidate] = []
-    sources: dict[str, tuple[StoredToolContent, ToolContentChunk]] = {}
+    sources: dict[str, tuple[StoredCachedToolOutput, CachedToolOutputChunk]] = {}
     for stored in stored_items:
         for chunk in stored.chunks:
             # 排序候选从 chunk 的原文 span 回读，避免只拿 locator 元数据参与语义检索。
@@ -194,7 +199,7 @@ async def _semantic_search(
 
     if not candidates or top_k <= 0:
         # 没有候选或调用方要求 0 条结果时，返回空检索结果。
-        return ToolContentSemanticSearchResult()
+        return CachedToolOutputSearchBySemanticsResult()
 
     # RankingPipeline 的请求模型要求 candidates 为 tuple，这里是外部契约不是内部数组语义。
     result = await ranking_pipeline.arank(
@@ -207,10 +212,10 @@ async def _semantic_search(
     )
 
     # semantic 结果使用独立窗口预算，避免检索结果一次塞入过多原文。
-    builder = ToolContentWindowBuilder(
+    builder = CachedToolOutputWindowBuilder(
         char_budget=settings.TOOL_CONTENT_SEMANTIC_SEARCH_WINDOW_CHAR_BUDGET
     )
-    results: list[ToolContentSemanticSearchItem] = []
+    results: list[CachedToolOutputSearchBySemanticsItem] = []
     remaining = settings.TOOL_CONTENT_SEMANTIC_SEARCH_TOTAL_CHAR_BUDGET
     budget_exhausted = False
     for item in result.ranked:
@@ -230,7 +235,7 @@ async def _semantic_search(
             char_budget=remaining,
         )
         results.append(
-            ToolContentSemanticSearchItem(
+            CachedToolOutputSearchBySemanticsItem(
                 content_id=content_id,
                 rank=item.rank,
                 score=item.score,
@@ -240,13 +245,13 @@ async def _semantic_search(
         )
         remaining -= len(window.text)
 
-    return ToolContentSemanticSearchResult(
+    return CachedToolOutputSearchBySemanticsResult(
         results=results,
         budget_exhausted=budget_exhausted,
     )
 
 
-def _chunk_text(stored: StoredToolContent, chunk: ToolContentChunk) -> str:
+def _chunk_text(stored: StoredCachedToolOutput, chunk: CachedToolOutputChunk) -> str:
     # chunk 可能由多个不连续 span 组成，用空行连接后交给 ranking pipeline。
     return "\n\n".join(
         stored.text[span.start_offset : span.end_offset].strip()

@@ -10,11 +10,12 @@ from chat.application.tools.core import (
     ToolParametersSchema,
     ToolPolicy,
     ToolRiskLevel,
+    ToolUISpec,
 )
-from chat.application.tools.core.output_cache.cache_store import ToolContentStore
+from chat.application.tools.core.output_cache.cache_store import ToolContentStore as CachedToolOutputStore
 from chat.core.config.app_settings import settings
 
-from chat.application.tools.session_tools.tool_content_tools.window import ToolContentWindow, ToolContentWindowBuilder
+from chat.application.tools.session_tools.cached_tool_output_tools.window import CachedToolOutputWindow, CachedToolOutputWindowBuilder
 
 _TIMEOUT_SECONDS = 300.0
 _PARAMETERS_SCHEMA: dict[str, Any] = {
@@ -23,7 +24,7 @@ _PARAMETERS_SCHEMA: dict[str, Any] = {
         "content_id": {
             "type": "string",
             "minLength": 1,
-            "description": "Required. One cnt_* id from a previous contents entry.",
+            "description": "Required. One cached tool output content_id returned in a previous tool result.",
         },
         "start": {
             "type": "integer",
@@ -44,31 +45,31 @@ _PARAMETERS_SCHEMA: dict[str, Any] = {
 
 
 @dataclass(slots=True)
-class ToolContentRangeReadResult:
+class CachedToolOutputReadByRangeResult:
     content_id: str
-    window: ToolContentWindow | None = None
+    window: CachedToolOutputWindow | None = None
     reason: str | None = None
 
 
-class ToolContentReadRangeTool:
+class CachedToolOutputReadByRangeTool:
     __slots__ = ("_definition", "_store")
 
-    def __init__(self, *, store: ToolContentStore) -> None:
+    def __init__(self, *, store: CachedToolOutputStore) -> None:
         self._store = store
         self._definition = ToolDefinition(
             llm_spec=ToolLLMSpec(
-                name="tool_content_read_range",
+                name="read_cached_tool_output_by_range",
                 description=(
-                    "Read source text from one cached content_id by character range.\n\n"
+                    "Read source text from one cached tool output content_id by character range.\n\n"
                     "WHEN TO TRIGGER:\n"
                     "  - MUST trigger when you already know the exact offset range, the beginning, "
-                    "or the end of cached content.\n"
+                    "or the end of cached tool output.\n"
                     "  - SHOULD trigger after structure/search results expose useful offsets.\n"
                     "DO NOT TRIGGER when:\n"
-                    "  - You need pages or sections; use tool_content_read_pages or "
-                    "tool_content_read_sections.\n"
-                    "  - You need discovery; use tool_content_semantic_search or "
-                    "tool_content_regex_search.\n\n"
+                    "  - You need pages or sections; use read_cached_tool_output_by_page or "
+                    "read_cached_tool_output_by_section.\n"
+                    "  - You need discovery; use search_cached_tool_output_by_semantics or "
+                    "search_cached_tool_output_by_regex.\n\n"
                     "INPUT RULES:\n"
                     "  - Ranges use Python slice semantics: start is inclusive and end is exclusive.\n"
                     "  - Negative offsets count from the end; start=-1000 reads the final 1000 characters.\n"
@@ -78,6 +79,10 @@ class ToolContentReadRangeTool:
                 parameters_schema=ToolParametersSchema(_PARAMETERS_SCHEMA),
             ),
             policy=_policy(),
+            ui_spec=ToolUISpec(
+                display_name="按范围读取缓存的工具输出",
+                description="按字符偏移读取缓存工具输出片段，适合精确续读或展开搜索命中的上下文。",
+            ),
         )
 
     @property
@@ -89,7 +94,7 @@ class ToolContentReadRangeTool:
         context: dict[str, Any],
         config: dict[str, Any] | None = None,
         **kwargs: Any,
-    ) -> ToolContentRangeReadResult:
+    ) -> CachedToolOutputReadByRangeResult:
         del config
         try:
             content_id = str(kwargs["content_id"])
@@ -100,15 +105,15 @@ class ToolContentReadRangeTool:
             )
             if stored is None:
                 # content 不存在时返回普通结果，让 LLM 可以改用 structure/search 重新定位。
-                return ToolContentRangeReadResult(
+                return CachedToolOutputReadByRangeResult(
                     content_id=content_id,
-                    reason="content_not_found",
+                    reason="cached_tool_output_not_found",
                 )
             # range 读取只受单窗口预算限制，多段读取由调用方根据 end_offset 继续发起。
-            builder = ToolContentWindowBuilder(
+            builder = CachedToolOutputWindowBuilder(
                 char_budget=settings.TOOL_CONTENT_READ_WINDOW_CHAR_BUDGET
             )
-            return ToolContentRangeReadResult(
+            return CachedToolOutputReadByRangeResult(
                 content_id=content_id,
                 window=builder.build_range_window(
                     stored,
@@ -118,7 +123,7 @@ class ToolContentReadRangeTool:
             )
         except Exception as exc:
             raise ToolExecutionError(
-                reason="tool_content_read_range_failed",
+                reason="read_cached_tool_output_by_range_failed",
                 detail_reason=str(exc),
                 retryable=False,
             ) from exc

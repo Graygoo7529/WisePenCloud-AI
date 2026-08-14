@@ -11,8 +11,9 @@ from chat.application.tools.core import (
     ToolParametersSchema,
     ToolPolicy,
     ToolRiskLevel,
+    ToolUISpec,
 )
-from chat.application.tools.core.output_cache.cache_store import ToolContentStore
+from chat.application.tools.core.output_cache.cache_store import ToolContentStore as CachedToolOutputStore
 from common.utils.chunkers import LocatorKind, TextLocator
 
 _TIMEOUT_SECONDS = 300.0
@@ -22,7 +23,7 @@ _PARAMETERS_SCHEMA: dict[str, Any] = {
         "content_id": {
             "type": "string",
             "minLength": 1,
-            "description": "Required. One cnt_* id from a previous contents entry.",
+            "description": "Required. One cached tool output content_id returned in a previous tool result.",
         },
     },
     "required": ["content_id"],
@@ -31,51 +32,51 @@ _PARAMETERS_SCHEMA: dict[str, Any] = {
 
 
 @dataclass(slots=True)
-class ToolContentStructurePage:
+class CachedToolOutputStructurePage:
     page_label: str
     start_offset: int
     end_offset: int
 
 
 @dataclass(slots=True)
-class ToolContentStructureSection:
+class CachedToolOutputStructureSection:
     title: str
     section_path: str
     start_offset: int
     end_offset: int
     has_content: bool
-    children: list["ToolContentStructureSection"] = field(default_factory=list)
+    children: list["CachedToolOutputStructureSection"] = field(default_factory=list)
 
 
 @dataclass(slots=True)
-class ToolContentStructureAnchor:
+class CachedToolOutputStructureAnchor:
     anchor_label: str
     start_offset: int
     end_offset: int
 
 
 @dataclass(slots=True)
-class ToolContentStructureResult:
+class CachedToolOutputStructureResult:
     content_id: str
     content_type: str | None = None
     total_length: int | None = None
-    pages: list[ToolContentStructurePage] = field(default_factory=list)
-    sections: list[ToolContentStructureSection] = field(default_factory=list)
-    anchors: list[ToolContentStructureAnchor] = field(default_factory=list)
+    pages: list[CachedToolOutputStructurePage] = field(default_factory=list)
+    sections: list[CachedToolOutputStructureSection] = field(default_factory=list)
+    anchors: list[CachedToolOutputStructureAnchor] = field(default_factory=list)
     metadata: dict[str, object] = field(default_factory=dict)
     reason: str | None = None
 
 
-class ToolContentGetStructureTool:
+class CachedToolOutputInspectStructureTool:
     __slots__ = ("_definition", "_store")
 
-    def __init__(self, *, store: ToolContentStore) -> None:
+    def __init__(self, *, store: CachedToolOutputStore) -> None:
         self._store = store
         self._definition = ToolDefinition(
             llm_spec=ToolLLMSpec(
-                name="tool_content_get_structure",
+                name="inspect_cached_tool_output_structure",
                 description=(
-                    "Get the structure for one cached content_id without reading body text.\n\n"
+                    "Get the structure for one cached tool output content_id without reading body text.\n\n"
                     "WHEN TO TRIGGER:\n"
                     "  - MUST trigger when you need available pages, sections, anchors, or offsets "
                     "before choosing what to read.\n"
@@ -83,9 +84,9 @@ class ToolContentGetStructureTool:
                     "exact page label, section path, or offset.\n\n"
                     "OUTPUT RULES:\n"
                     "  - Returns total_length, pages, a section tree, and anchors.\n"
-                    "  - Use page_label with tool_content_read_pages.\n"
-                    "  - Use section_path with tool_content_read_sections.\n"
-                    "  - Use offsets with tool_content_read_range.\n"
+                    "  - Use page_label with read_cached_tool_output_by_page.\n"
+                    "  - Use section_path with read_cached_tool_output_by_section.\n"
+                    "  - Use offsets with read_cached_tool_output_by_range.\n"
                     "  - This tool does not return body text."
                 ),
                 parameters_schema=ToolParametersSchema(_PARAMETERS_SCHEMA),
@@ -96,6 +97,10 @@ class ToolContentGetStructureTool:
                 risk_level=ToolRiskLevel.LOW,
                 required_context_keys=("session_id",),
                 timeout_seconds=_TIMEOUT_SECONDS,
+            ),
+            ui_spec=ToolUISpec(
+                display_name="查看缓存的工具输出结构",
+                description="读取缓存工具输出的页面、章节、锚点和字符偏移，用于定位后续读取范围。",
             ),
         )
 
@@ -108,7 +113,7 @@ class ToolContentGetStructureTool:
         context: dict[str, Any],
         config: dict[str, Any] | None = None,
         **kwargs: Any,
-    ) -> ToolContentStructureResult:
+    ) -> CachedToolOutputStructureResult:
         del config
         try:
             content_id = str(kwargs["content_id"])
@@ -118,11 +123,11 @@ class ToolContentGetStructureTool:
                 session_id=str(context["session_id"]),
             )
             if stored is None:
-                return ToolContentStructureResult(
+                return CachedToolOutputStructureResult(
                     content_id=content_id,
-                    reason="content_not_found",
+                    reason="cached_tool_output_not_found",
                 )
-            return ToolContentStructureResult(
+            return CachedToolOutputStructureResult(
                 content_id=content_id,
                 # store 只保存 is_markdown，对外仍需要返回稳定的 content_type 字符串。
                 content_type="text/markdown" if stored.is_markdown else "text/plain",
@@ -134,7 +139,7 @@ class ToolContentGetStructureTool:
             )
         except Exception as exc:
             raise ToolExecutionError(
-                reason="tool_content_get_structure_failed",
+                reason="inspect_cached_tool_output_structure_failed",
                 detail_reason=str(exc),
                 retryable=False,
             ) from exc
@@ -142,10 +147,10 @@ class ToolContentGetStructureTool:
 
 def _build_pages(
     locators: Sequence[TextLocator],
-) -> list[ToolContentStructurePage]:
+) -> list[CachedToolOutputStructurePage]:
     # page locator 保留物理页边界，供后续按页读取。
     return [
-        ToolContentStructurePage(
+        CachedToolOutputStructurePage(
             page_label=locator.name.removeprefix("page:"),
             start_offset=locator.start_offset,
             end_offset=locator.end_offset,
@@ -157,10 +162,10 @@ def _build_pages(
 
 def _build_anchors(
     locators: Sequence[TextLocator],
-) -> list[ToolContentStructureAnchor]:
+) -> list[CachedToolOutputStructureAnchor]:
     # anchor locator 通常来自 Markdown 标题或显式锚点，用于快速跳转到局部内容。
     return [
-        ToolContentStructureAnchor(
+        CachedToolOutputStructureAnchor(
             anchor_label=locator.name.removeprefix("anchor:"),
             start_offset=locator.start_offset,
             end_offset=locator.end_offset,
@@ -172,7 +177,7 @@ def _build_anchors(
 
 def _build_sections(
     locators: Sequence[TextLocator],
-) -> list[ToolContentStructureSection]:
+) -> list[CachedToolOutputStructureSection]:
     # section locator 是扁平列表，structure 工具负责恢复成树状导航。
     section_locators = [
         locator for locator in locators if locator.kind is LocatorKind.SECTION
@@ -193,10 +198,10 @@ def _build_sections(
         # 同级 section 按原文起始位置排序，保持文档阅读顺序。
         children.sort(key=lambda path: locator_by_path[path].start_offset)
 
-    def build(path: tuple[str, ...]) -> ToolContentStructureSection:
+    def build(path: tuple[str, ...]) -> CachedToolOutputStructureSection:
         # 递归构建 section tree，children 只保存直接子节点。
         locator = locator_by_path[path]
-        return ToolContentStructureSection(
+        return CachedToolOutputStructureSection(
             title=path[-1],
             section_path=" > ".join(path),
             start_offset=locator.start_offset,

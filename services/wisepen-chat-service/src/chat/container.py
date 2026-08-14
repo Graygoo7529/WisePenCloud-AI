@@ -49,13 +49,13 @@ from chat.application.tools.core.output_cache.cache_manager import ToolOutputCac
 from chat.application.tools.core.output_cache.cache_store import ToolContentStore
 from chat.application.tools.session_tools.get_historical_chat_messages_tool import GetHistoricalChatMessagesTool
 from chat.application.tools.session_tools.load_image_attachment_tool import LoadImageAttachmentTool
-from chat.application.tools.session_tools.tool_content_tools import (
-    ToolContentGetStructureTool,
-    ToolContentReadPagesTool,
-    ToolContentReadRangeTool,
-    ToolContentReadSectionsTool,
-    ToolContentRegexSearchTool,
-    ToolContentSemanticSearchTool,
+from chat.application.tools.session_tools.cached_tool_output_tools import (
+    CachedToolOutputInspectStructureTool,
+    CachedToolOutputReadByPageTool,
+    CachedToolOutputReadByRangeTool,
+    CachedToolOutputReadBySectionTool,
+    CachedToolOutputSearchByRegexTool,
+    CachedToolOutputSearchBySemanticsTool,
 )
 from chat.core.config.nacos import nacos_client_manager
 from chat.service_client import FileStorageClient, AIAssetClient, McpServiceClient, ResourceClient
@@ -241,28 +241,28 @@ class Container(containers.DeclarativeContainer):
         resource_client=resource_client,
         file_loader=oss_file_loader,
     )
-    tool_content_get_structure_tool = providers.Singleton(
-        ToolContentGetStructureTool,
+    inspect_cached_tool_output_structure_tool = providers.Singleton(
+        CachedToolOutputInspectStructureTool,
         store=tool_content_store,
     )
-    tool_content_read_pages_tool = providers.Singleton(
-        ToolContentReadPagesTool,
+    read_cached_tool_output_by_page_tool = providers.Singleton(
+        CachedToolOutputReadByPageTool,
         store=tool_content_store,
     )
-    tool_content_read_range_tool = providers.Singleton(
-        ToolContentReadRangeTool,
+    read_cached_tool_output_by_range_tool = providers.Singleton(
+        CachedToolOutputReadByRangeTool,
         store=tool_content_store,
     )
-    tool_content_read_sections_tool = providers.Singleton(
-        ToolContentReadSectionsTool,
+    read_cached_tool_output_by_section_tool = providers.Singleton(
+        CachedToolOutputReadBySectionTool,
         store=tool_content_store,
     )
-    tool_content_regex_search_tool = providers.Singleton(
-        ToolContentRegexSearchTool,
+    search_cached_tool_output_by_regex_tool = providers.Singleton(
+        CachedToolOutputSearchByRegexTool,
         store=tool_content_store,
     )
-    tool_content_semantic_search_tool = providers.Singleton(
-        ToolContentSemanticSearchTool,
+    search_cached_tool_output_by_semantics_tool = providers.Singleton(
+        CachedToolOutputSearchBySemanticsTool,
         store=tool_content_store,
     )
     tool_providers = providers.List(
@@ -270,12 +270,12 @@ class Container(containers.DeclarativeContainer):
         load_image_attachment_tool,
         load_skill_tool,
         load_skill_asset_tool,
-        tool_content_get_structure_tool,
-        tool_content_read_pages_tool,
-        tool_content_read_range_tool,
-        tool_content_read_sections_tool,
-        tool_content_regex_search_tool,
-        tool_content_semantic_search_tool,
+        inspect_cached_tool_output_structure_tool,
+        read_cached_tool_output_by_page_tool,
+        read_cached_tool_output_by_range_tool,
+        read_cached_tool_output_by_section_tool,
+        search_cached_tool_output_by_regex_tool,
+        search_cached_tool_output_by_semantics_tool,
     )
 
     tool_registry = providers.Singleton(
